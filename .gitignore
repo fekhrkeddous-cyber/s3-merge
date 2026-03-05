@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+*.so
+
+# Data & Checkpoints
+checkpoints*/
+data/
+datasets/
+*.pth
+*.pt
+
+# Logs
+logs_*.txt
+*.log
+*.csv
+*.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Experiments
+output_*/
+results_*/
+wandb/
+runs/
+
+# Paper / LaTeX
+overleaf_upload/
+*.pdf
+!figures/*.pdf

@@ -1,0 +1,26 @@
+# Core
+torch>=2.0.0
+torchvision>=0.15.0
+timm>=0.9.0
+
+# Utilities
+numpy>=1.24.0
+scipy>=1.10.0
+tqdm>=4.65.0
+pyyaml>=6.0
+
+# Visualization (for figure generation)
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# Optional: Triton-fused kernels (included with recent PyTorch)
+# triton>=2.1.0
+
+# Optional: Tracking (not required for evaluation)
+# wandb>=0.15.0
+# tensorboard>=2.13.0
+
+# Optional: Downstream tasks
+# mmdet>=3.0.0          # COCO detection (via mim install)
+# mmsegmentation>=1.0.0 # ADE20K segmentation (via mim install)
+# detectron2             # ViTDet (build from source)
