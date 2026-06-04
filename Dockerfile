@@ -7,7 +7,7 @@
 #
 # Run:
 #   docker run --gpus all --shm-size=16g -it \
-#     -v /twdata:/twdata \
+#     -v /path/to/imagenet:/data/imagenet \
 #     -v $PWD:/workspace \
 #     srtome-cv:cu121
 #

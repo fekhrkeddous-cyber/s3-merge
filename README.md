@@ -123,26 +123,38 @@ from models.triton_merge import sr_tome_merge_triton
 All experiments can be reproduced with the scripts below. Results match those reported in the paper when using the same hardware (H100 NVL) and Docker environment.
 
 ```bash
-# Table 1 — Main comparison (ImageNet-1K, 50k val, 5 seeds)
+# Table 2 — Main ImageNet-1K comparison (DeiT-S, 50k val, 5 seeds)
 python eval_imagenet_baselines.py --mode full
 
-# Table 2 — Batch-size scaling
+# Table 3 — Throughput scaling across batch sizes
 python benchmark_batch_scaling.py
 
-# Table 3 — ADE20K segmentation (requires mmseg + UPerNet checkpoint)
-python eval_ade20k_upernet.py
-
-# Table 4 — COCO detection (requires detectron2 + ViTDet checkpoint)
-python eval_coco_vitdet.py
-
-# Table 5 — Overhead decomposition
+# Table 4 — Overhead decomposition
 python profile_overhead.py
 
-# Figure 3 — Pareto frontier
+# Table 8 — ADE20K UPerNet-ViT-B backbone throughput (requires mmseg)
+python eval_ade20k_upernet.py
+
+# Table 9 — COCO ViTDet-B end-to-end evaluation (requires detectron2)
+python eval_coco_vitdet.py
+
+# Figure 4 — Accuracy–throughput Pareto frontier
 python generate_pareto_fixed.py
 
-# Figure 4 — Batch scaling plot
+# Figure 5 — Latency/throughput scaling vs batch size
 python generate_batch_scaling_pa.py
+
+# Figure 6 — CUDA kernel time breakdown (168 launches vs 10)
+python scripts/profile_kernel_breakdown.py --batch_sizes 1 32 --figure_out artifacts/kernel_profiling.pdf
+
+# Figure 7 — Amdahl decomposition (ViTDet backbone vs decoder)
+python plot_amdahl_decomposition.py
+
+# Supplementary Table S13 — Controlled SDPA backend experiment
+python benchmark_sdpa_control.py
+
+# Supplementary Table S5 / S14 — Cross-hardware validation (H100 / L40S / Orin)
+python benchmark_cross_hardware.py
 ```
 
 See [`scripts/reproduce_tables.sh`](scripts/reproduce_tables.sh) for a one-click script.

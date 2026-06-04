@@ -32,50 +32,58 @@ run_table() {
     echo ""
 
     case "$table" in
-        1)
-            echo "Table 1: Main ImageNet-1K comparison (DeiT-S, 50k val, 5 seeds)"
+        2)
+            echo "Table 2: Main ImageNet-1K comparison (DeiT-S, 50k val, 5 seeds)"
             echo "Expected runtime: ~45 min on H100"
             python eval_imagenet_baselines.py --mode full
             ;;
-        2)
-            echo "Table 2: Batch-size scaling (B=1..64)"
-            python benchmark_batch_scaling.py
-            ;;
         3)
-            echo "Table 3: ADE20K UPerNet-ViT-B (requires mmseg)"
-            python eval_ade20k_upernet.py
+            echo "Table 3: Throughput scaling across batch sizes (B=1..64)"
+            python benchmark_batch_scaling.py
             ;;
         4)
             echo "Table 4: Overhead decomposition"
             python profile_overhead.py
             ;;
-        5)
-            echo "Table 5: Ablation studies"
+        7)
+            echo "Table 7: Factorised ablation"
             python run_ablation_experiments.py
             ;;
-        fig3)
-            echo "Figure 3: Pareto frontier"
-            python generate_pareto_fixed.py
+        8)
+            echo "Table 8: ADE20K UPerNet-ViT-B backbone throughput (requires mmseg)"
+            python eval_ade20k_upernet.py
+            ;;
+        9)
+            echo "Table 9: COCO ViTDet-B end-to-end evaluation (requires detectron2)"
+            python eval_coco_vitdet.py
             ;;
         fig4)
-            echo "Figure 4: Batch scaling plot"
-            python generate_batch_scaling_pa.py
+            echo "Figure 4: Accuracy-throughput Pareto frontier"
+            python generate_pareto_fixed.py
             ;;
         fig5)
-            echo "Figure 5: Amdahl decomposition"
+            echo "Figure 5: Latency/throughput scaling vs batch size"
+            python generate_batch_scaling_pa.py
+            ;;
+        fig6)
+            echo "Figure 6: CUDA kernel time breakdown (168 launches vs 10)"
+            python scripts/profile_kernel_breakdown.py --batch_sizes 1 32 --figure_out artifacts/kernel_profiling.pdf
+            ;;
+        fig7)
+            echo "Figure 7: Amdahl decomposition"
             python plot_amdahl_decomposition.py
             ;;
         sdpa)
-            echo "Supplementary: Controlled SDPA backend experiment"
+            echo "Supplementary Table S13: Controlled SDPA backend experiment"
             python benchmark_sdpa_control.py
             ;;
         cross_hw)
-            echo "Supplementary: Cross-hardware validation"
+            echo "Supplementary Tables S5 / S14: Cross-hardware validation"
             python benchmark_cross_hardware.py
             ;;
         *)
             echo "Unknown table: $table"
-            echo "Valid options: 1, 2, 3, 4, 5, fig3, fig4, fig5, sdpa, cross_hw"
+            echo "Valid options: 2, 3, 4, 7, 8, 9, fig4, fig5, fig6, fig7, sdpa, cross_hw"
             exit 1
             ;;
     esac
@@ -83,13 +91,13 @@ run_table() {
 
 if [ $# -eq 0 ]; then
     echo "Running ALL reproducibility experiments..."
-    for t in 1 2 4 5 fig3 fig4; do
+    for t in 2 3 4 7 fig4 fig5 fig6 fig7; do
         run_table "$t"
     done
     echo ""
     echo "=========================================="
-    echo "  Skipped: Table 3 (requires mmseg setup)"
-    echo "  Skipped: cross_hw (requires L40S/Orin)"
+    echo "  Skipped: Tables 8 / 9 (require mmseg / detectron2 setup)"
+    echo "  Skipped: cross_hw (requires L40S / Jetson Orin)"
     echo "  Run individually if needed."
     echo "=========================================="
 else

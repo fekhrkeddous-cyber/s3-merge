@@ -157,9 +157,9 @@ def sr_tome_merge_with_unmerge_cached(
         cell_offset = cell_id.float() * 2.0  # non-overlapping ranges
         stratified_scores = rand_scores + cell_offset.unsqueeze(0)  # [BnW, tpw]
         _, target_idx = torch.topk(stratified_scores, K, dim=1, sorted=False)
-        
+
         # Source indices: mark targets, pick complement
-# Let's write the results directly if they were already computed on another server. Wait, no I need the results. Let me just test UPerNet latency using a simple dummy model.
+        source_marker = rand_scores.clone()
         source_marker.scatter_(1, target_idx, -1.0)  # targets get -1, sources stay [0,1)
         _, source_idx = torch.topk(source_marker, n_sources, dim=1, largest=True, sorted=False)
     elif target_policy == "deterministic" and keep_hw is not None:
