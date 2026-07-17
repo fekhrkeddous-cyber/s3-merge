@@ -8,50 +8,47 @@ All commands assume the project Docker image (`Dockerfile`) is built and the con
 
 | Item | Script / command |
 |---|---|
-| **Table 1** — Design comparison (ToMe vs S³-Merge) | non-experimental (qualitative summary) |
-| **Table 2** — ImageNet-1K main comparison, DeiT-S/16, 50k val, 5 seeds | `python eval_imagenet_baselines.py --mode full` |
-| **Table 3** — Throughput scaling across batch sizes | `python benchmark_batch_scaling.py` |
-| **Table 4** — Overhead breakdown on DeiT-S at 224² | `python profile_overhead.py` |
-| **Table 5** — Window-size sweep | `python sweep_window_size.py` |
-| **Table 6** — Target-selection ablation (Random, Grid, L2-Norm-high, L2-Norm-low, Attention-centrality) | `python ablation_merge_strategies.py` runs the Random and L2-Norm-high variants out of the box; the Grid (deterministic) variant is exposed via `target_policy="deterministic"` in `models/sr_tome_downstream.py`; L2-Norm-low and Attention-centrality are documented inline as variants of the same one-line code path (see *Selection-strategy notes* below) |
-| **Table 7** — Factorised ablation (when/where/when-to-activate) | `python run_ablation_experiments.py` |
-| **Table 8** — ADE20K UPerNet-ViT-B backbone throughput | `python eval_ade20k_upernet.py` (requires mmseg + UPerNet checkpoint) |
-| **Table 9** — COCO ViTDet-B end-to-end evaluation, with Adaptive-K row | `python eval_coco_vitdet.py --adaptive_k_main` (requires detectron2 + ViTDet-B checkpoint) |
-| **Table 10** — Backbone-only latency at downstream resolutions | `python model_scale_study.py --resolutions 224 384 1024` |
-| **Table 11** — ViT-B/16 latency promoted from supplementary | `python model_scale_study.py --backbone vit_base_patch16_224` |
-| **Table 12** — Modern ViT-L backbones (DINOv2, SigLIP) | `python model_scale_study.py --backbone {vit_large_patch16_224,dinov2_vitl14,siglip_vit_l16_256}` (DINOv2 / SigLIP runs apply a minimal monkey-patch on the HuggingFace encoder forward to insert the same merge call as the timm path) |
-| **Table 13** — Cross-hardware deployment summary (H100 / L40S / Jetson Orin) | `python benchmark_cross_hardware.py` (run once per device; Jetson Orin requires JetPack and FP32 — see Cross-Hardware section below) |
-| **Figure 4** — Accuracy–throughput Pareto frontier | `python generate_pareto_fixed.py` |
-| **Figure 5** — Latency/throughput scaling vs batch size | `python generate_batch_scaling_pa.py` |
-| **Figure 6** — CUDA kernel time breakdown (168 launches vs 10) | `python scripts/profile_kernel_breakdown.py --batch_sizes 1 32 --figure_out artifacts/kernel_profiling.pdf` |
-| **Figure 7** — Amdahl decomposition (ViTDet backbone vs decoder) | `python plot_amdahl_decomposition.py` |
-| **Algorithm 1** — S³-Merge pseudocode | implemented in `models/sr_tome.py::sr_tome_merge_exact` |
-| **Section 5** — Safe Mode dispatch | calibration code in `benchmark_batch_scaling.py` and `eval_coco_vitdet.py` (search for `b_star`) |
-| **Section 6.1** — Timing protocol | implemented in every `benchmark_*.py` script: one-shot tensor placement, 30 warmup + 200 timed passes, per-iteration `torch.cuda.synchronize()`, `time.perf_counter` |
-| **Section 6.5** — Triton-fused merge kernels | `models/triton_merge.py` (three `@triton.jit` kernels: `_fused_cosine_argmax_kernel`, `_fused_weighted_merge_kernel`, `_fused_restore_index_kernel`). Block-size, tiling-strategy, and shared-memory parameters are documented as `tl.constexpr` arguments inside each kernel definition. |
+| **Table 1** — ImageNet-1K main comparison, DeiT-S/16, 50k val, 5 seeds | `python eval_imagenet_baselines.py --seeds 5` |
+| **Table 2** — Overhead breakdown on DeiT-S at 224² | `python profile_overhead.py` |
+| **Table 3** — Target-selection ablation (Random 30 seeds, Norm-high, Grid, Norm-low, Attention) | `python run_ablation_experiments.py` (PART 1; the paper's reconstruction uses 30 random seeds and the selection-cost microbenchmark protocol) |
+| **Table 4** — Factorised ablation (when/where/when-to-activate) | `python run_ablation_experiments.py` |
+| **Table 5** — ADE20K UPerNet-ViT-B | `python eval_ade20k_upernet.py --run_full_eval` (requires mmseg + UPerNet checkpoint) |
+| **Table 6** — COCO ViTDet-B end-to-end evaluation incl. Adaptive-K | `python eval_coco_vitdet.py --run_full_eval` (requires detectron2 + ViTDet-B checkpoint; the Adaptive-K allocation/packed core is `models/adaptive_k.py`) |
+| **Table 7** — Backbone-only latency at downstream resolutions | `python model_scale_study.py` |
+| **Table 8** — Model-scale study (DeiT-S / ViT-B across resolutions) | `python model_scale_study.py` |
+| **Table 9** — Modern ViT-L backbones (DINOv2, SigLIP) | `python model_scale_study.py` (DINOv2 / SigLIP runs apply a minimal monkey-patch on the HuggingFace encoder forward to insert the same merge call as the timm path) |
+| **Table 10** — Cross-hardware deployment summary (H100 / L40S / Jetson Orin) | `python benchmark_cross_hardware.py` (run once per device) |
+| **Figure 4** — Merge-cluster locality excerpt | pre-built panel (see Figure S2 note below) |
+| **Figure 5** — Accuracy–throughput Pareto frontier | `python generate_pareto_fixed.py` |
+| **Figure 6** — Latency/throughput scaling vs batch size | `python generate_batch_scaling_pa.py` |
+| **Figure 7** — CUDA kernel time breakdown (168 launches vs 10) | `python scripts/profile_kernel_breakdown.py --batch_sizes 1 32 --figure_out artifacts/kernel_profiling.pdf` |
+| **Figure 8** — Amdahl decomposition (ViTDet backbone vs decoder) | `python plot_amdahl_decomposition.py` |
+| **Algorithm 1** — S³-Merge pseudocode (Static-K Core) | implemented in `models/sr_tome.py::sr_tome_merge_exact`; Adaptive-K extension in `models/adaptive_k.py` |
+| **Section 5** — Safe Mode | `python models/safemode.py --validate` (bootstrap-LCB rule, cached B*, baseline fallback); crossover sweeps also in `benchmark_batch_scaling.py` and `eval_coco_vitdet.py --calibration` |
+| **Section 6.1** — Timing protocol | paper protocol: 30 warm-up + 200 timed passes, per-iteration `torch.cuda.synchronize()`, five independent invocations, paired-bootstrap CIs. Scripts using 30+200 directly: `benchmark_batch_scaling.py`, `model_scale_study.py`, `sweep_window_size.py`, `profile_overhead.py`; other scripts state their own iteration counts in their headers. |
+| **Section 6.5** — Triton-fused merge kernels | `models/triton_merge.py` |
 | **Section 6.6** — Controlled SDPA backend experiment | `python benchmark_sdpa_control.py` |
-| **Section 6.7** — Algorithmic complexity + kernel profiling | discussed in `profile_overhead.py`'s output |
-| **Section 7.2** — Target-selection / deterministic Grid | `models/sr_tome.py` (Random by default) + `models/sr_tome_downstream.py` (`target_policy="deterministic"` is the Grid variant) |
-| **Section 8.1** — ADE20K dense prediction | `eval_ade20k_upernet.py` |
-| **Section 8.2** — COCO Amdahl-limited case study | `eval_coco_vitdet.py` + `plot_amdahl_decomposition.py` |
+| **Section 7.2** — Target-selection policies | `run_ablation_experiments.py` (five strategies); deterministic variance-aware Static-K = `models/adaptive_k.py` with `allocate_uniform` and `sel_scores=None`; grid policy = `target_policy="deterministic"` in `models/sr_tome_downstream.py` |
+| **Section 8.2** — COCO Amdahl-limited case study + decoder-light contrast | `eval_coco_vitdet.py` + `plot_amdahl_decomposition.py`; the LW-DETR decoder-light confirmation is a wrapper-level integration of the official Atten4Vis/LW-DETR release (external to this repo) using the same `models/adaptive_k.py` merge semantics with uniform per-window K |
 
 ## Supplementary
 
 | Item | Script / command |
 |---|---|
-| **Table S1** — DeiT-S/16 384² baseline latency | `python benchmark_batch_scaling.py --resolution 384` |
-| **Table S2** — 384² keep-ratio sweep (K∈{40, 32, 24}) | `python sweep_window_size.py --resolution 384 --K 40 32 24` |
-| **Table S3** — ViT-B/16 merge-layer sensitivity (Ls∈{6,8,10}) | `python ablation_merge_strategies.py --backbone vit_base_patch16_224 --ls 6 8 10` |
-| **Table S4** — Broader window-size ablation across backbones / resolutions | `python sweep_window_size.py --backbone {deit_small,deit_iii_small,vit_base} --resolution {224,384}` |
-| **Table S5** — Cross-hardware validation, original Jetson Orin observed measurement | `python benchmark_cross_hardware.py --device {h100,l40s,orin}` (requires the named device) |
-| **Table S6** — Adaptive-K at higher compression (COCO) | `python eval_coco_vitdet.py --adaptive_k --keep_grid 7 7` |
-| **Table S9** — Timing-variance addendum (5-run CIs on close-call cells) | `python benchmark_50k_3seed.py --seeds 5 --variance_addendum` (the script supports the 5-run variance addendum protocol) |
-| **Table S10** — ADE20K PA on/off | `python eval_ade20k_upernet.py --pa_sweep` |
-| **Table S11** — COCO ViTDet PA cross-task | `python eval_coco_vitdet.py --pa_sweep` |
-| **Table S13** — Controlled SDPA backend experiment (full table) | `python benchmark_sdpa_control.py --full_table` |
-| **Table S14** — Repeated Jetson Orin keep-ratio sweep (r∈{0.87, 0.70, 0.56, 0.43}) | `python benchmark_cross_hardware.py --device orin --repeated_sweep --r 0.87 0.70 0.56 0.43` |
-| **Figure S2** — Per-image merge-cluster visualisation | external visualisation script (`exp1_visualize_merge_clusters.py` in the development repo) — output `figures/merge_cluster_panel.pdf` is included pre-built in the manuscript figures package; the captures hook directly into `models.sr_tome.sr_tome_merge_exact` and can be reproduced with that function plus `matplotlib` |
-| **Figure S4** — Dense-prediction failure visualisation | external visualisation script for ADE20K predictions (input / GT / baseline / S³-Merge / disagreement) — output is included pre-built in the figures package; the captures hook into `eval_ade20k_upernet.py` |
+| **Table S1** — DeiT-S/16 384² baseline latency | `python benchmark_batch_scaling.py --img_size 384` |
+| **Table S2** — 384² keep-ratio sweep | `python sweep_window_size.py --target_tokens 360` (repeat with 288, 216; latency at 384² via `benchmark_batch_scaling.py --img_size 384`) |
+| **Table S3** — ViT-B/16 merge-layer sensitivity | `python ablation_merge_strategies.py --model vit_base_patch16_224` |
+| **Table S4** — Broader window-size ablation | `python sweep_window_size.py` (per backbone/resolution) |
+| **Table S5** — Cross-hardware validation | `python benchmark_cross_hardware.py` on each device |
+| **Table S6** — Complete COCO metrics under the corrected packed implementation | `python eval_coco_vitdet.py --run_full_eval` (+ `models/adaptive_k.py`) |
+| **Table S9** — Timing-variance addendum (5-run CIs) | `python benchmark_50k_3seed.py --seeds 5` |
+| **Tables S10/S11** — PA on/off (ADE20K / COCO) | `python eval_ade20k_upernet.py --run_full_eval` / `python eval_coco_vitdet.py --run_full_eval` with `prop_attn` toggled |
+| **Table S13** — Controlled SDPA backend experiment | `python benchmark_sdpa_control.py` |
+| **Table S14** — Repeated Jetson Orin keep-ratio sweep | `python benchmark_cross_hardware.py` on the Orin (per keep ratio) |
+| **Table S18** — Reproduced L40S measurements | `python benchmark_cross_hardware.py` on an L40S under the paper-matched environment (torch 2.1.2+cu121, timm 1.0.24, FP32; five process invocations) |
+| **Table S19** — LW-DETR decoder-light confirmation | wrapper-level integration of the official `Atten4Vis/LW-DETR` release (commit d5e6e6c4, official `LWDETR_medium_60e_coco.pth`); merge core semantics identical to `models/adaptive_k.py` with uniform per-window K=75/100 inserted after encoder block 6 |
+| **Figure S2** — Per-image merge-cluster visualisation | external visualization script, not included in this release — output `figures/merge_cluster_panel.pdf` is included pre-built in the manuscript figures package; the captures hook directly into `models.sr_tome.sr_tome_merge_exact` and can be reproduced with that function plus `matplotlib` |
+| **Figure S4** — Dense-prediction failure visualisation | external visualization script for ADE20K predictions — output is included pre-built in the figures package; the captures hook into `eval_ade20k_upernet.py` |
 
 ## Selection-strategy notes (Table 6)
 
@@ -67,7 +64,7 @@ The repository ships the first three strategies as runnable; the last two are do
 
 ## Adaptive-K (Table 9, Section 8.2)
 
-The Adaptive-K mitigation replaces uniform-random within-window target selection with a variance-aware selection (centred L2 distance from the window mean). The ADE20K-fallback driver is `models/adaptive_k_patch.py` (`apply_adaptive_k_to_srtome`) which:
+The Adaptive-K mitigation replaces uniform-random within-window target selection with a variance-aware selection (centred L2 distance from the window mean). The ADE20K-fallback driver is `models/adaptive_k_patch.py` (`models/adaptive_k.py` (`adaptive_merge_pack`, `allocate_slot_auction`)) which:
 
 - computes per-window feature variance at the merge layer,
 - buckets windows into a high-variance group (K_high targets) and a low-variance group (K_low targets) with `mean(K) == K_static`,

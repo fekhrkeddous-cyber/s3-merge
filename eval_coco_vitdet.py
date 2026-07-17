@@ -176,7 +176,7 @@ def apply_dynamic_window_patch(model):
     vit._dynamic_window_patched = True
     print(f"Patched {count} blocks for dynamic window sizing.")
 
-def apply_srtome_detectron2(model, ratio=0.7, late_start=6, merge_ws=8, weighted_merge=True,
+def apply_srtome_detectron2(model, ratio=0.7, late_start=6, merge_ws=8, weighted_merge=False,  # Eq. 1 uniform averaging (paper default)
                             keep_hw=None, target_policy="random"):
     """
     Patches D2 ViTDet model with S³-Merge (spatially-preserving variant).

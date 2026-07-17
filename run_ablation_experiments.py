@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Experiments for reviewer response:
+Target-selection and seed-variance ablations:
 1. Target selection ablation: random vs norm vs grid vs attention  
 2. 5-seed classification with t-test
 """

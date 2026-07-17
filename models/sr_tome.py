@@ -286,8 +286,8 @@ class PropAttnBlock(nn.Module):
 
 def apply_patch(
     model: nn.Module,
-    target_tokens: int = 87,
-    late_start: int = 6,
+    target_tokens: int = 84,
+    late_start: int = 8,  # paper defaults: T=84, l8
     window_size: int = 7,
     weighted_merge: bool = False,
     tau: float = 0.3,
@@ -329,8 +329,8 @@ def apply_patch(
 
 def create_sr_tome_v3(
     model_name: str = 'deit_small_patch16_224',
-    target_tokens: int = 87,
-    late_start: int = 6,
+    target_tokens: int = 84,
+    late_start: int = 8,  # paper defaults: T=84, l8
     window_size: int = 7,
     pretrained: bool = True,
     weighted_merge: bool = False,

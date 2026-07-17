@@ -3,7 +3,7 @@
 # Provides: detectron2 (COCO/ViTDet) + mmseg (ADE20K/UPerNet) with nvcc
 #
 # Build:
-#   docker build -f Dockerfile.srtome_cv -t srtome-cv:cu121 .
+#   docker build -f Dockerfile -t s3merge:cu121 .
 #
 # Run:
 #   docker run --gpus all --shm-size=16g -it \

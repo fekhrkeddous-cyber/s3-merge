@@ -35,7 +35,7 @@ run_table() {
         2)
             echo "Table 2: Main ImageNet-1K comparison (DeiT-S, 50k val, 5 seeds)"
             echo "Expected runtime: ~45 min on H100"
-            python eval_imagenet_baselines.py --mode full
+            python eval_imagenet_baselines.py --seeds 5
             ;;
         3)
             echo "Table 3: Throughput scaling across batch sizes (B=1..64)"

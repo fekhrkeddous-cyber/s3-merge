@@ -77,7 +77,7 @@ def sr_tome_merge_with_unmerge_cached(
     x: torch.Tensor,        # [B, N, C] with CLS at index 0
     target_tokens: int,     # Exact number of patch tokens to output (used if keep_hw is None)
     cache: GridMappingCache,
-    weighted_merge: bool = True,   # Use similarity-weighted fusion
+    weighted_merge: bool = False,  # Eq. 1 uniform averaging (paper default; set True for the similarity-weighted ablation)   # Use similarity-weighted fusion
     tau: float = 0.1,              # Temperature for weight softmax
     track_sizes: bool = False,     # Return token sizes for proportional attention
     keep_hw: tuple = None,         # (kh, kw) rectangular keep-grid per window
@@ -316,7 +316,7 @@ class SRToMeDownstream(nn.Module):
         late_start: int = 8,
         window_size: int = 7,
         grid_size: int = 14,
-        weighted_merge: bool = True,
+        weighted_merge: bool = False,  # Eq. 1 uniform averaging (paper default; set True for the similarity-weighted ablation)
         tau: float = 0.1,
         prop_attn: bool = False,
     ):
@@ -419,7 +419,7 @@ def create_sr_tome_downstream(
     late_start: int = 8,
     window_size: int = 7,
     pretrained: bool = True,
-    weighted_merge: bool = True,
+    weighted_merge: bool = False,  # Eq. 1 uniform averaging (paper default; set True for the similarity-weighted ablation)
     tau: float = 0.1,
     prop_attn: bool = False,
 ) -> SRToMeDownstream:

@@ -15,13 +15,13 @@ pip install git+https://github.com/facebookresearch/ToMe.git
 ### PiToMe (NeurIPS 2024)
 
 ```bash
-git clone https://github.com/piotrmwojcik/PiToMe.git baselines/PiToMe
+git clone https://github.com/hchautran/PiToMe.git baselines/PiToMe
 ```
 
 ### ATC (ECCV 2024)
 
 ```bash
-git clone https://github.com/JoakimHauworWorWorrum/ATC.git baselines/ATC
+git clone https://github.com/JoakimHaurum/ATC.git baselines/ATC
 ```
 
 ### DSM (NeurIPS 2024 Workshop)
