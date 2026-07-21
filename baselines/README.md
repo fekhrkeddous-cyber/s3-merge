@@ -44,5 +44,5 @@ model = apply_method(model, 'pitome', ratio=0.55)
 
 ## Notes
 
-- All baselines are evaluated under identical conditions (same model, dataset, hardware, timing protocol) via `eval_imagenet_baselines.py`
+- All baselines run through one common harness (`eval_imagenet_baselines.py`: same model, dataset, hardware, timing procedure). In the paper's Table 1, Baseline/ToMe/S³-Merge timings come from the unified FP32 campaign, while PiToMe/ATC/DSM retain their clearly labelled original-campaign measurements
 - DSM is our vectorized re-implementation from the paper description; we release the code for verification

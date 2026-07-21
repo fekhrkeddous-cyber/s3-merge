@@ -9,7 +9,7 @@ All commands assume the project Docker image (`Dockerfile`) is built and the con
 | Item | Script / command |
 |---|---|
 | **Table 1** — ImageNet-1K main comparison, DeiT-S/16, 50k val, 5 seeds | `python eval_imagenet_baselines.py --seeds 5` |
-| **Table 2** — Overhead breakdown on DeiT-S at 224² | `python profile_overhead.py` |
+| **Table 2** — Overhead breakdown on DeiT-S at 224² | published Table 2 is the FP32, T=84 (+PA) decomposition reporting the direct total and the component subtotal separately; `python profile_overhead.py` reproduces the historical FP16 r≈0.7 breakdown unless reconfigured to the main configuration |
 | **Table 3** — Target-selection ablation (Random 30 seeds, Norm-high, Grid, Norm-low, Attention) | `python run_ablation_experiments.py` (PART 1; the paper's reconstruction uses 30 random seeds and the selection-cost microbenchmark protocol) |
 | **Table 4** — Factorised ablation (when/where/when-to-activate) | `python run_ablation_experiments.py` |
 | **Table 5** — ADE20K UPerNet-ViT-B | `python eval_ade20k_upernet.py --run_full_eval` (requires mmseg + UPerNet checkpoint) |
@@ -20,9 +20,9 @@ All commands assume the project Docker image (`Dockerfile`) is built and the con
 | **Table 10** — Cross-hardware deployment summary (H100 / L40S / Jetson Orin) | `python benchmark_cross_hardware.py` (run once per device) |
 | **Figure 4** — Merge-cluster locality excerpt | pre-built panel (see Figure S2 note below) |
 | **Figure 5** — Accuracy–throughput Pareto frontier | `python generate_pareto_fixed.py` |
-| **Figure 6** — Latency/throughput scaling vs batch size | `python generate_batch_scaling_pa.py` |
-| **Figure 7** — CUDA kernel time breakdown (168 launches vs 10) | `python scripts/profile_kernel_breakdown.py --batch_sizes 1 32 --figure_out artifacts/kernel_profiling.pdf` |
-| **Figure 8** — Amdahl decomposition (ViTDet backbone vs decoder) | `python plot_amdahl_decomposition.py` |
+| **Figure 6** — Latency/throughput scaling vs batch size | published Figure 6 plots the unified FP32 campaign (B ∈ [1, 64]); `python generate_batch_scaling_pa.py` reproduces the historical PA-campaign figure from its embedded data |
+| **Figure 7** — CUDA kernel time breakdown (168 vs 10 Scatter/Merge-category launches; bar totals 612/197/162 at B=1) | `python scripts/profile_kernel_breakdown.py --batch_sizes 1 32 --figure_out artifacts/kernel_profiling.pdf` |
+| **Section 8.2** — Amdahl decoder-ceiling analysis | the paper's former absolute-bar figure was removed; `python plot_amdahl_decomposition.py` reproduces the historical illustration only |
 | **Algorithm 1** — S³-Merge pseudocode (Static-K Core) | implemented in `models/sr_tome.py::sr_tome_merge_exact`; Adaptive-K extension in `models/adaptive_k.py` |
 | **Section 5** — Safe Mode | `python models/safemode.py --validate` (bootstrap-LCB rule, cached B*, baseline fallback); crossover sweeps also in `benchmark_batch_scaling.py` and `eval_coco_vitdet.py --calibration` |
 | **Section 6.1** — Timing protocol | paper protocol: 30 warm-up + 200 timed passes, per-iteration `torch.cuda.synchronize()`, five independent invocations, paired-bootstrap CIs. Scripts using 30+200 directly: `benchmark_batch_scaling.py`, `model_scale_study.py`, `sweep_window_size.py`, `profile_overhead.py`; other scripts state their own iteration counts in their headers. |
@@ -95,4 +95,4 @@ Stochastic methods use seeds `{0, 1, 2, 3, 4}` (5-seed default) via `torch.manua
 
 ## Anonymous-release export
 
-The repository at `https://anonymous.4open.science/r/s3-merge-E000` is exported as `git archive HEAD --format=zip` so that the `.git` directory is excluded.
+The public repository is `https://github.com/fekhrkeddous-cyber/s3-merge`.

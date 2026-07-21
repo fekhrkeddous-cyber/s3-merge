@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-Publication-quality batch scaling figure for ECCV 2026 S³-Merge paper.
+Historical batch-scaling figure reproducer (PA-campaign data embedded below).
 Dual-panel: (a) Latency vs Batch Size, (b) Throughput vs Batch Size.
-Updated with PA variant data matching Table 3.
+The published Figure 6 uses the unified FP32 campaign (B in [1, 64]) instead;
+see EXPERIMENTS.md.
 """
 import matplotlib
 matplotlib.use('Agg')

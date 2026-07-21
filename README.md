@@ -8,7 +8,7 @@
   <img src="figures/pipeline_diagram.png" width="90%" alt="S³-Merge pipeline overview"/>
 </p>
 
-Anonymous review snapshot: https://anonymous.4open.science/r/s3-merge-E000
+Public repository: https://github.com/fekhrkeddous-cyber/s3-merge
 
 ---
 
@@ -45,10 +45,15 @@ in-memory lookup; unqualified batch sizes fall back to the unmodified baseline.
 
 | Method | Top-1 (%) | ΔTop-1 | B=1 (ms) ↓ | B=32 (img/s) ↑ |
 |--------|-----------|--------|-------------|-----------------|
-| Baseline | 79.71 | — | 2.40 | 2680 |
-| ToMe r=10 | 79.09 | −0.62 | 7.44 | 3054 |
-| **S³-Merge-Acc (l8+PA)** | **79.50 ± 0.02** | **−0.21** | 2.92 | 2998 |
-| S³-Merge-Speed (l6+PA) | 79.01 ± 0.05 | −0.70 | 3.03 | **3377** |
+| Baseline | 79.71 | — | 2.33 | 2543 |
+| ToMe r=10 | 79.09 | −0.62 | 7.32 | 3002 |
+| **S³-Merge-Acc (l8+PA)** | **79.50 ± 0.02** | **−0.21** | 2.87 | 2938 |
+| S³-Merge-Speed (l6+PA) | 79.01 ± 0.05 | −0.70 | 2.98 | **3306** |
+
+Timings are from the paper's unified FP32 campaign (five invocations, 30 warm-up +
+200 timed iterations, per-iteration synchronization); accuracy and timing are
+separate evaluations. ToMe r=12 exceeds S³-Merge-Acc at B=32 and leads at B=64;
+S³-Merge-Speed leads at B=32 (details in the paper's Section 6.3).
 
 Dense prediction (measured end-to-end framing, no universal-acceleration claim):
 - **ViTDet-B / Mask R-CNN (COCO)** is *decoder-bound* (decoder ≈29% of latency):
