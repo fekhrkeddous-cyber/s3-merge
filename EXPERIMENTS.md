@@ -15,7 +15,7 @@ All commands assume the project Docker image (`Dockerfile`) is built and the con
 | **Table 5** — ADE20K UPerNet-ViT-B | `python eval_ade20k_upernet.py --run_full_eval` (requires mmseg + UPerNet checkpoint) |
 | **Table 6** — COCO ViTDet-B end-to-end evaluation incl. Adaptive-K | `python eval_coco_vitdet.py --run_full_eval` (requires detectron2 + ViTDet-B checkpoint; the Adaptive-K allocation/packed core is `models/adaptive_k.py`) |
 | **Table 7** — Backbone-only latency at downstream resolutions | `python model_scale_study.py` |
-| **Table 8** — Model-scale study (DeiT-S / ViT-B across resolutions) | `python model_scale_study.py` |
+| **Table 8** — Speed across model sizes/resolutions (scope-labelled per row) | DeiT-S 224² row: unified FP32 full-forward campaign (see Section 6.1 row below); ViT-B 224² row: `python model_scale_study.py` (AMP/FP16 full-forward); ViT-B 512²/1024² rows: backbone-only, same source as Table 7 |
 | **Table 9** — Modern ViT-L backbones (DINOv2, SigLIP) | `python model_scale_study.py` (DINOv2 / SigLIP runs apply a minimal monkey-patch on the HuggingFace encoder forward to insert the same merge call as the timm path) |
 | **Table 10** — Cross-hardware deployment summary (H100 / L40S / Jetson Orin) | `python benchmark_cross_hardware.py` (run once per device) |
 | **Figure 4** — Merge-cluster locality excerpt | pre-built panel (see Figure S2 note below) |
@@ -38,8 +38,8 @@ All commands assume the project Docker image (`Dockerfile`) is built and the con
 | **Table S1** — DeiT-S/16 384² baseline latency | `python benchmark_batch_scaling.py --img_size 384` |
 | **Table S2** — 384² keep-ratio sweep | `python sweep_window_size.py --target_tokens 360` (repeat with 288, 216; latency at 384² via `benchmark_batch_scaling.py --img_size 384`) |
 | **Table S3** — ViT-B/16 merge-layer sensitivity | `python ablation_merge_strategies.py --model vit_base_patch16_224` |
-| **Table S4** — Broader window-size ablation | `python sweep_window_size.py` (per backbone/resolution) |
-| **Table S5** — Cross-hardware validation | `python benchmark_cross_hardware.py` on each device |
+| **Table S4** — Broader window-size ablation (DeiT-S/16 and ViT-B/16 at 224² only) | `python sweep_window_size.py --model deit_small_patch16_224` / `--model vit_base_patch16_224`. Note: a previous 384² multi-window block was removed from the paper because its experiment wrapper did not pass the required grid size, so those configurations followed the keep-all guard instead of merging; pass the grid size explicitly when sweeping any non-14 grid. Validated 384² evidence is Tables S1/S2/S9. |
+| **Table S5** — Cross-hardware validation | `python benchmark_cross_hardware.py` on each device. Note: the published cells come from three distinct campaigns and operating points — H100 at K=21 (r_eff≈0.43, original CUDA-event campaign), L40S and Jetson Orin at the conservative r_eff≈0.87 (reproduced five-invocation and dedicated repeated campaigns respectively); the Top-1 column is the Orin evaluation only. |
 | **Table S6** — Complete COCO metrics under the corrected packed implementation | `python eval_coco_vitdet.py --run_full_eval` (+ `models/adaptive_k.py`) |
 | **Table S9** — Timing-variance addendum (5-run CIs) | `python benchmark_50k_3seed.py --seeds 5` |
 | **Tables S10/S11** — PA on/off (ADE20K / COCO) | `python eval_ade20k_upernet.py --run_full_eval` / `python eval_coco_vitdet.py --run_full_eval` with `prop_attn` toggled |
