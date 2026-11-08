@@ -5,6 +5,7 @@ Uses HuggingFace ImageNet-1K dataset (Arrow format).
 
 Usage: python sweep_window_size.py [--max_batches 200]
 """
+import os
 import argparse, csv, time, sys
 import torch
 import torch.nn.functional as F

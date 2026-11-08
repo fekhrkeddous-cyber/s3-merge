@@ -1,0 +1,74 @@
+# Paper Table 1 / Fig. 5 protocol (unified S3-Merge vs official ToMe, ImageNet-1K DeiT-S/16).
+# REFERENCE MIRROR of the command-line defaults of the scripts in this directory; the scripts do NOT read this file.
+# Changing a value here changes nothing; pass the corresponding command-line flag instead.
+
+model:
+  timm_name: deit_small_patch16_224          # pretrained tag fb_in1k (timm/deit_small_patch16_224.fb_in1k)
+  checkpoint_file_sha256: 1e747b4a8d0df2cfbd3c450e8c97685d867448ab0c2ddbfb34b6885f5cb23e5b   # --expected-sha256
+  state_sha256: a17d00754ef1e5401cf33cf61af23094c48b8f4a4f5f8898d8ae36b9d81925e1             # --expected-state-sha256
+  precision: fp32                            # no autocast, no torch.compile
+  tf32_matmul: false
+  tf32_cudnn: true                           # PyTorch default; patch-embedding conv only
+  cudnn_benchmark: false
+  device: cuda                               # paper: one NVIDIA H100 NVL
+
+official_tome:
+  repository: https://github.com/facebookresearch/ToMe
+  commit: af95e4b1befa172dadccd8c81e223b10090f9579
+  verify_source_sha256: true                 # --no-verify-tome disables
+  patch_call: "tome.patch.timm(model, trace_source=False, prop_attn=True); model.r = r"
+
+arms:                                        # --arms
+  baseline: {family: unmerged}
+  tome_r10: {family: official_tome, r: 10, prop_attn: true}
+  tome_r12: {family: official_tome, r: 12, prop_attn: true}
+  s3_acc:                                    # S3-Merge-Acc (paper L_s = 9)
+    apply_patch: {target_tokens: 84, late_start: 8, window_size: 7, weighted_merge: false, tau: 0.3,
+                  content_adaptive: false, prop_attn: true, grid_size: 14}
+  s3_speed:                                  # S3-Merge-Speed (paper L_s = 7)
+    apply_patch: {target_tokens: 84, late_start: 6, window_size: 7, weighted_merge: false, tau: 0.3,
+                  content_adaptive: false, prop_attn: true, grid_size: 14}
+
+timing:
+  batch_sizes: [1, 8, 32]                    # --batch-sizes (timed in this order within an arm)
+  warmup: 30                                 # --warmup (synchronize after each)
+  iters: 200                                 # --iters (synchronize before and after each)
+  profiled_forwards: 20                      # --profiled-forwards (profile mode only)
+  select_seed: 1000                          # --select-seed: torch.manual_seed before every (arm, B) cell
+  input_seed: 20260718                       # --input-seed: CPU torch.Generator; randn float32 [B,3,224,224], drawn B=1,8,32
+  input_tensor_sha256:
+    1: 49167eef0df80828c3ea073066eaaebdc5aca87c3e2c4a3f7587509abd542a74
+    8: 4c455aee2a20fbd51ab739aaf18f7f35ab8c29ade756a9b0f8d02cc87c9f206d
+    32: 11967863a78b6535a7619104329d21e6640d19dd5a1c720d3148c2db1afbe86d
+  order_seed: 20261104                       # --order-seed: random.Random(seed).sample over the six original keys
+  order_keys: [baseline, SW, s3_acc, s3_speed, tome_r10, tome_r12]   # SW drawn but never run (not a Table 1 arm)
+  latency_invocations: 10                    # timing_campaign.py --invocations
+  profile_invocations: 3                     # timing_campaign.py --profile-invocations
+  idle_check_samples: 60                     # timing_campaign.py; optional, warn-only
+
+timing_analysis:
+  unit: invocation mean of the timed forwards
+  latency: mean of invocation means, 95% t-CI (df = n-1)
+  throughput: geometric mean over invocations of B / latency
+  speedup: paired per invocation vs baseline, geometric mean, 95% t-CI + percentile bootstrap
+  bootstrap_resamples: 10000                 # --bootstrap-resamples
+  bootstrap_seed: 0                          # --bootstrap-seed (numpy default_rng)
+  margin: 0.01                               # --margin
+  paired_ratio_pairs: [[s3_acc, tome_r10], [s3_acc, tome_r12], [s3_speed, tome_r10], [s3_speed, tome_r12], [s3_speed, s3_acc]]
+
+accuracy:
+  dataset: ILSVRC/imagenet-1k validation (Hugging Face arrow shards, Dataset.from_file, shard order)
+  num_shards: 12                             # --num-shards
+  n_images: 50000                            # hf_index 0..49999, no shuffle
+  preprocessing: "convert('RGB') -> Resize(256) -> CenterCrop(224) -> ToTensor -> Normalize(ImageNet mean/std)"
+  batch_size: 64                             # --batch-size
+  num_workers: 8                             # --num-workers
+  seeding: "torch.manual_seed(s); np.random.seed(s) once at run start"
+  runs:                                      # accuracy_campaign.py --runs
+    baseline_s0: {arm: baseline, seed: 0, role: deterministic}
+    tome_r10_s0: {arm: tome_r10, seed: 0, role: primary}
+    tome_r10_s0_rep: {arm: tome_r10, seed: 0, role: determinism_replicate}
+    tome_r12_s0: {arm: tome_r12, seed: 0, role: primary}
+    tome_r12_s0_rep: {arm: tome_r12, seed: 0, role: determinism_replicate}
+    s3_acc_seeds: [0, 1, 2, 3, 4]            # run ids s3_acc_s0 .. s3_acc_s4
+    s3_speed_seeds: [0, 1, 2, 3, 4]          # run ids s3_speed_s0 .. s3_speed_s4

@@ -4,19 +4,21 @@ This directory provides a unified API for evaluating training-free token merging
 
 ## Setup
 
-S³-Merge is self-contained in `models/`. To reproduce baseline comparisons from the paper, install the following third-party methods:
+S³-Merge is self-contained in `models/`. The third-party methods below are installed separately and are not redistributed here (check each project's licence; ToMe and PiToMe are CC BY-NC 4.0).
 
 ### ToMe (ICLR 2023)
 
 ```bash
-pip install git+https://github.com/facebookresearch/ToMe.git
+pip install "git+https://github.com/facebookresearch/ToMe.git@af95e4b1befa172dadccd8c81e223b10090f9579"   # commit used for paper Table 1
 ```
 
 ### PiToMe (NeurIPS 2024)
 
 ```bash
-git clone https://github.com/hchautran/PiToMe.git baselines/PiToMe
+git clone https://github.com/hchautran/PiToMe.git baselines/PiToMe && git -C baselines/PiToMe checkout 550b5deed94aadfeac28bfbe381d87e672044a40
 ```
+
+The timm >= 1.0 compatibility adapter used for Supplementary Table S23 is **not included** in this release.
 
 ### ATC (ECCV 2024)
 
@@ -26,7 +28,8 @@ git clone https://github.com/JoakimHaurum/ATC.git baselines/ATC
 
 ### DSM (NeurIPS 2024 Workshop)
 
-Our DSM re-implementation is included in `dsm_impl.py` — no official code was available at time of writing.
+`dsm_impl.py` is an exploratory re-implementation from the paper description (no official code was available).
+DSM is **not** compared quantitatively in the paper, and this code produced none of its results.
 
 ## Usage
 
@@ -44,5 +47,6 @@ model = apply_method(model, 'pitome', ratio=0.55)
 
 ## Notes
 
-- All baselines run through one common harness (`eval_imagenet_baselines.py`: same model, dataset, hardware, timing procedure). In the paper's Table 1, Baseline/ToMe/S³-Merge timings come from the unified FP32 campaign, while PiToMe/ATC/DSM retain their clearly labelled original-campaign measurements
-- DSM is our vectorized re-implementation from the paper description; we release the code for verification
+- `eval_imagenet_baselines.py` is the harness of the original (earlier) campaign. Paper Table 1 (Baseline, ToMe r=10/12, S³-Merge-Acc/Speed) comes from the separate ten-invocation unified FP32 comparison in `r3/unified_tome/` with official ToMe; PiToMe and ATC appear only in Supplementary Table S23 (original-campaign measurements, not comparable with Table 1).
+- The PiToMe comparison used an archived local adapter that is not included in this release (see `REPRODUCIBILITY.md`); the PiToMe arm of `eval_imagenet_baselines.py` therefore stops with an explicit error
+- DSM: exploratory re-implementation, released for inspection only; not used for any number in the paper

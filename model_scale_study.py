@@ -4,7 +4,12 @@ Model-scale study: evaluate S³-Merge on ViT-B (vs DeiT-S baseline in main paper
 Tests our default configuration on a larger model.
 
 Usage: python model_scale_study.py [--max_batches None]
+
+HISTORICAL SCRIPT, kept for reference. The paper's Table 7 ViT-B/16 row comes from a historical run of this
+script with an earlier implementation that had no proportional attention. For that configuration use
+r3/table7_vitb16/run_table7_vitb16.py (explicit, asserted PA-off). Here PA is set explicitly to off as well.
 """
+import os
 import argparse, csv, time, sys
 import torch
 import timm
@@ -127,7 +132,8 @@ def main():
             apply_patch(model,
                         target_tokens=target_tokens,
                         late_start=late_start,
-                        window_size=ws)
+                        window_size=ws,
+                        prop_attn=False)
 
             lat_b1 = measure_latency(model, dummy_b1, args.n_iter)
             lat_b8 = measure_latency(model, dummy_b8, args.n_iter)

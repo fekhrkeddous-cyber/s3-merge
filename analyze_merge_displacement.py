@@ -7,6 +7,7 @@ Produces a histogram figure showing that windowed merging bounds displacement.
 Also runs CAMR ablation (content_adaptive on/off).
 """
 
+import os
 import torch
 import torch.nn.functional as F
 import numpy as np

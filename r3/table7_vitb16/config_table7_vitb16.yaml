@@ -1,0 +1,32 @@
+# Paper Table 7, ViT-B/16 row (footnote b) -- protocol described in Supplementary Section S1.2.
+# Historical result (paper-authoritative): 80.92% vs 81.08% Top-1 (-0.16), 0.90x at B=1, 1.02x at B=64.
+# This file reconstructs that configuration for the current implementation; exact numerical identity is not
+# guaranteed because the implementation and the software environment have evolved since the original run.
+model: vit_base_patch16_224          # timm model name, pretrained=True (timm default weights for this name)
+img_size: 224
+merge:
+  late_start: 8                      # 0-indexed block whose output is merged -> paper L_s = 9
+  target_tokens: 136                 # K = 136 // 4 windows = 34 targets per 7x7 window
+  window_size: 7
+  prop_attn: false                   # REQUIRED and must be false for this row (no proportional attention)
+expected:
+  L_s: 9
+  patch_tokens_out: 136
+  total_tokens_out: 137              # including [CLS]
+precision: amp_fp16                  # torch.cuda.amp.autocast() for both timing and accuracy
+timing:
+  batch_sizes: [1, 64]
+  warmup: 30
+  iters: 200
+  sync: around_loop                  # torch.cuda.synchronize() before and after the timed loop only
+  invocations: 1
+  input: synthetic                   # device-resident torch.randn input of shape (B, 3, 224, 224)
+accuracy:
+  dataset: ILSVRC/imagenet-1k        # Hugging Face datasets, split "validation" (50,000 images), no shuffle
+  batch_size: 64
+  num_workers: 4
+  resize: 256                        # torchvision Resize(256) -> CenterCrop(224) -> ImageNet mean/std
+  crop: 224
+  mean: [0.485, 0.456, 0.406]
+  std: [0.229, 0.224, 0.225]
+reference_hardware: NVIDIA H100 NVL

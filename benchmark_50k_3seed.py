@@ -9,6 +9,7 @@ Methods:
 
 For stochastic methods, run 3 seeds and report mean ± std.
 """
+import os
 import argparse
 import time
 import csv

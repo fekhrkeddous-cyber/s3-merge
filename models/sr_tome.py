@@ -4,6 +4,8 @@ SR-ToMe v3: Fixed Token Budget via Random K-Target Selection
 Key fix: Instead of even/odd split (which limits output to |dst|),
 we randomly select exactly K targets per window and merge all others into them.
 """
+import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -13,15 +15,71 @@ import time
 from typing import Tuple, Optional
 
 
+def resolve_merge_geometry(n_patches: int, target_tokens: int, window_size: int,
+                           grid_size: Optional[int] = None, keep_all_control: bool = False) -> dict:
+    """Resolve and validate the windowed merge geometry for a square patch grid.
+
+    The grid side is derived from the number of patch tokens (``n_patches`` = grid**2, [CLS] excluded) unless
+    ``grid_size`` is given, in which case the two must agree. K = target_tokens // n_windows targets are kept per
+    window (paper Section 3), so the merged output has n_windows * K patch tokens plus [CLS].
+
+    Raises ValueError for any geometry that cannot be merged as specified, instead of silently skipping the merge:
+      * a token count that is not a square grid, or that disagrees with ``grid_size``;
+      * a window size that does not divide the grid;
+      * a target budget smaller than the number of windows (K would be 0).
+    Configurations that by construction perform no merge (window_size >= grid, or K >= window_size**2, e.g. the
+    w=14 and w=1 keep-all controls of the paper's window sweep) are only accepted with ``keep_all_control=True``;
+    the returned dict then has ``merges=False``.
+    """
+    if n_patches <= 0:
+        raise ValueError(f"S3-Merge: no patch tokens (n_patches={n_patches})")
+    g = math.isqrt(n_patches)
+    if g * g != n_patches:
+        raise ValueError(f"S3-Merge: {n_patches} patch tokens do not form a square grid; the classification path "
+                         f"requires a square grid and exactly one [CLS] token at index 0")
+    if grid_size is not None and int(grid_size) != g:
+        raise ValueError(f"S3-Merge: grid_size={grid_size} but the input has {n_patches} patch tokens ({g}x{g} grid)")
+    if window_size < 1:
+        raise ValueError(f"S3-Merge: window_size must be >= 1 (got {window_size})")
+    geom = {"grid": g, "window_size": int(window_size), "target_tokens": int(target_tokens),
+            "patch_tokens_in": n_patches, "merges": True, "reason": ""}
+    if window_size >= g:
+        geom.update(n_windows=1, tokens_per_window=n_patches, k_per_window=n_patches,
+                    patch_tokens_out=n_patches, merges=False,
+                    reason=f"window_size {window_size} >= grid {g}: keep-all control (no merge by construction)")
+    else:
+        if g % window_size:
+            raise ValueError(f"S3-Merge: window_size={window_size} does not divide the {g}x{g} grid; choose a divisor "
+                             f"(the paper uses the largest divisor of the grid not exceeding 8)")
+        n_windows = (g // window_size) ** 2
+        tpw = window_size * window_size
+        k = min(max(1, target_tokens // n_windows), tpw)
+        if k >= tpw:
+            geom.update(n_windows=n_windows, tokens_per_window=tpw, k_per_window=tpw, patch_tokens_out=n_patches,
+                        merges=False, reason=f"K={k} >= window area {tpw}: keep-all control (no merge by construction)")
+        elif target_tokens // n_windows < 1:
+            raise ValueError(f"S3-Merge: target_tokens={target_tokens} is smaller than the {n_windows} windows; "
+                             f"at least one target per window is required")
+        else:
+            geom.update(n_windows=n_windows, tokens_per_window=tpw, k_per_window=k, patch_tokens_out=n_windows * k)
+    if not geom["merges"] and not keep_all_control:
+        raise ValueError(f"S3-Merge: {geom['reason']}. This configuration performs no merge; pass "
+                         f"keep_all_control=True only to run it deliberately as a control.")
+    geom["total_tokens_out"] = geom["patch_tokens_out"] + 1
+    return geom
+
+
 def sr_tome_merge_exact(
     x: torch.Tensor,        # [B, N, C] with CLS at index 0
     target_tokens: int,     # Exact number of patch tokens to output
     window_size: int = 7,   # Window size
-    grid_size: int = 14,
+    grid_size: Optional[int] = None,  # derived from the token count when None
     weighted_merge: bool = False,   # Use similarity-weighted fusion
     tau: float = 0.3,               # Temperature for weight softmax
-    content_adaptive: bool = False, # CAMR: adapt K per window based on redundancy
+    content_adaptive: bool = False, # CAMR: adapt K per window based on redundancy (legacy; not used in the paper)
     track_sizes: bool = False,      # Return token sizes for proportional attention
+    keep_all_control: bool = False, # accept configurations that perform no merge by construction
+    _geometry: Optional[dict] = None,  # pre-resolved geometry (SRToMeBlock caches it per token count)
 ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
     """
     SR-ToMe with exact token budget via random K-target selection.
@@ -33,8 +91,8 @@ def sr_tome_merge_exact(
     3. Optionally fuse via similarity-weighted averaging
     
     Returns:
-        merged_x: [B, 1+target_tokens, C] — CLS + merged patches
-        token_sizes: [B, 1+target_tokens] if track_sizes else None  
+        merged_x: [B, 1 + n_windows*K, C] — CLS + merged patches, K = target_tokens // n_windows
+        token_sizes: [B, 1 + n_windows*K] if track_sizes else None
                      — number of original tokens each output represents
     """
     B, N, C = x.shape
@@ -43,12 +101,15 @@ def sr_tome_merge_exact(
     patches = x[:, 1:]
     n_patches = N - 1
     
+    geom = _geometry if _geometry is not None else resolve_merge_geometry(
+        n_patches, target_tokens, window_size, grid_size, keep_all_control)
+    if not geom["merges"]:
+        return x, None      # explicit keep-all control (validated above)
+    if content_adaptive and track_sizes:
+        raise NotImplementedError("S3-Merge: the legacy content-adaptive (CAMR) path does not track token sizes, "
+                                  "so it cannot be combined with proportional attention")
+    grid_size = geom["grid"]
     H = W = grid_size
-    if patches.shape[1] != H * W:
-        return x, None
-    
-    if window_size >= grid_size:
-        return x, None
     
     ws = window_size
     n_windows_h = H // ws
@@ -236,7 +297,8 @@ class SRToMeBlock(nn.Module):
     """
     def __init__(self, block: nn.Module, target_tokens: int, window_size: int = 7,
                  weighted_merge: bool = False, tau: float = 0.3,
-                 content_adaptive: bool = False, prop_attn: bool = True):
+                 content_adaptive: bool = False, prop_attn: bool = True,
+                 grid_size: Optional[int] = None, keep_all_control: bool = False):
         super().__init__()
         self.block = block
         self.target_tokens = target_tokens
@@ -245,14 +307,27 @@ class SRToMeBlock(nn.Module):
         self.tau = tau
         self.content_adaptive = content_adaptive
         self.prop_attn = prop_attn
+        self.grid_size = grid_size
+        self.keep_all_control = keep_all_control
+        self.last_geometry = None  # resolved geometry of the last forward pass
+        self._geometry_cache = {}  # token count -> validated geometry (resolved once, then a dict lookup)
         self._token_sizes = None  # populated during forward
         
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.block(x)
+        n_patches = x.shape[1] - 1
+        geom = self._geometry_cache.get(n_patches)
+        if geom is None:
+            geom = resolve_merge_geometry(n_patches, self.target_tokens, self.window_size,
+                                          self.grid_size, self.keep_all_control)
+            self._geometry_cache[n_patches] = geom
+        self.last_geometry = geom
         x, sizes = sr_tome_merge_exact(
             x, self.target_tokens, 
             window_size=self.window_size,
-            grid_size=14,
+            grid_size=self.grid_size,
+            keep_all_control=self.keep_all_control,
+            _geometry=geom,
             weighted_merge=self.weighted_merge,
             tau=self.tau,
             content_adaptive=self.content_adaptive,
@@ -287,23 +362,52 @@ class PropAttnBlock(nn.Module):
 def apply_patch(
     model: nn.Module,
     target_tokens: int = 84,
-    late_start: int = 8,  # paper defaults: T=84, l8
+    late_start: int = 8,  # S3-Merge-Acc: T=84, late_start=8 (paper L_s=9)
     window_size: int = 7,
     weighted_merge: bool = False,
     tau: float = 0.3,
     content_adaptive: bool = False,
     prop_attn: bool = True,
+    grid_size: Optional[int] = None,
+    keep_all_control: bool = False,
 ):
     """
     Applies S³-Merge patch in-place to the model.
-    - Replaces blocks[late_start] with SRToMeBlock wrapper.
+    - Replaces blocks[late_start] with SRToMeBlock wrapper. ``late_start`` is the 0-indexed block whose output is
+      merged, so the paper's L_s = late_start + 1.
     - If prop_attn: wraps blocks[late_start+1:] with PropAttnBlock for
       proportional attention (log-size bias on attention logits).
+    - The patch grid is taken from ``model.patch_embed.grid_size`` (timm) unless ``grid_size`` is given; the
+      geometry is validated here (see ``resolve_merge_geometry``) and again on every forward pass, so a
+      configuration can never silently skip the merge.
+    - The resolved configuration is stored in ``model.s3merge_config``.
     """
     blocks = model.blocks if hasattr(model, 'blocks') else model.model.blocks
     
     if isinstance(blocks[late_start], SRToMeBlock):
-        return model
+        raise RuntimeError("S3-Merge: model is already patched; create a fresh model to change the configuration")
+    n_prefix = getattr(model, "num_prefix_tokens", 1)
+    if n_prefix != 1 or getattr(model, "cls_token", None) is None:
+        raise ValueError(f"S3-Merge: apply_patch requires exactly one [CLS] prefix token (model has {n_prefix})")
+    pe_grid = getattr(getattr(model, "patch_embed", None), "grid_size", None)
+    if pe_grid is not None:
+        gh, gw = (pe_grid, pe_grid) if isinstance(pe_grid, int) else tuple(pe_grid)
+        if gh != gw:
+            raise ValueError(f"S3-Merge: non-square patch grid {gh}x{gw} is not supported by the classification path")
+        if grid_size is not None and int(grid_size) != gh:
+            raise ValueError(f"S3-Merge: grid_size={grid_size} but the model's patch grid is {gh}x{gw}")
+        grid_size = gh
+    if grid_size is None:
+        raise ValueError("S3-Merge: cannot determine the patch grid; pass grid_size explicitly")
+    geom = resolve_merge_geometry(grid_size * grid_size, target_tokens, window_size, grid_size, keep_all_control)
+    model.s3merge_config = {
+        "target_tokens": int(target_tokens), "late_start": int(late_start), "L_s": int(late_start) + 1,
+        "window_size": int(window_size), "grid": geom["grid"], "n_windows": geom["n_windows"],
+        "k_per_window": geom["k_per_window"], "patch_tokens_out": geom["patch_tokens_out"],
+        "total_tokens_out": geom["total_tokens_out"], "merges": geom["merges"], "reason": geom["reason"],
+        "prop_attn": bool(prop_attn), "weighted_merge": bool(weighted_merge), "tau": float(tau),
+        "content_adaptive": bool(content_adaptive), "keep_all_control": bool(keep_all_control),
+    }
 
     # Wrap the merge layer
     original_block = blocks[late_start]
@@ -315,6 +419,8 @@ def apply_patch(
         tau=tau,
         content_adaptive=content_adaptive,
         prop_attn=prop_attn,
+        grid_size=grid_size,
+        keep_all_control=keep_all_control,
     )
     blocks[late_start] = merge_block
     
@@ -330,18 +436,21 @@ def apply_patch(
 def create_sr_tome_v3(
     model_name: str = 'deit_small_patch16_224',
     target_tokens: int = 84,
-    late_start: int = 8,  # paper defaults: T=84, l8
+    late_start: int = 8,  # S3-Merge-Acc: T=84, late_start=8 (paper L_s=9)
     window_size: int = 7,
     pretrained: bool = True,
     weighted_merge: bool = False,
     tau: float = 0.3,
     content_adaptive: bool = False,
     prop_attn: bool = True,
+    grid_size: Optional[int] = None,
+    keep_all_control: bool = False,
 ) -> nn.Module:
     base = timm.create_model(model_name, pretrained=pretrained)
     apply_patch(base, target_tokens=target_tokens, late_start=late_start,
                 window_size=window_size, weighted_merge=weighted_merge, tau=tau,
-                content_adaptive=content_adaptive, prop_attn=prop_attn)
+                content_adaptive=content_adaptive, prop_attn=prop_attn,
+                grid_size=grid_size, keep_all_control=keep_all_control)
     return base
 
 

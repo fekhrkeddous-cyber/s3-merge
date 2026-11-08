@@ -11,6 +11,7 @@ A2: Replace similarity matching with uniform/spatial merge
 SR-ToMe: Stratified Random ToMe with windowed local merging
     - Keep diversity but add spatial coverage constraints
 """
+import os
 import argparse
 import time
 import csv

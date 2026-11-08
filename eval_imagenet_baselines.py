@@ -169,6 +169,10 @@ def create_model(cfg, device):
         model = timm.create_model('deit_small_patch16_224', pretrained=True).to(device).eval()
         # Use importlib for our timm 1.0-compatible adapter
         _pitome_path = ROOT / 'baselines' / 'pitome_adapter.py'
+        if not _pitome_path.exists():
+            raise FileNotFoundError(
+                "The PiToMe comparison (Supplementary Table S23) used an archived local timm>=1.0 compatibility "
+                "adapter that is not included in this release (see REPRODUCIBILITY.md); the PiToMe arm cannot be run.")
         _spec = importlib.util.spec_from_file_location('pitome_adapter', _pitome_path)
         _pitome_mod = importlib.util.module_from_spec(_spec)
         _spec.loader.exec_module(_pitome_mod)

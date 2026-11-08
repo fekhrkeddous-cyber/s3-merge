@@ -4,6 +4,7 @@ SOFTWARE TESTS ONLY: synthetic tensors verify shapes and invariants; nothing her
 is scientific evidence or a benchmark. Run: python tests/test_public.py
 Requires torch (+ CUDA optional) and timm; no dataset or checkpoint downloads.
 """
+import os
 import pathlib
 import py_compile
 import re
@@ -118,10 +119,18 @@ check("safemode-fallback-rule", lcb_bad < 1.02 < lcb_good,
       f"lcb_bad={lcb_bad:.3f} lcb_good={lcb_good:.3f}")
 
 # 11. no private-path scan ---------------------------------------------------
-pat = re.compile(r"/twdata|fkeddous|braavos|10\.3\.42|/home/[a-z]")
+# Generic patterns only; maintainers can add site-specific ones through the environment variable
+# S3MERGE_PRIVATE_PATTERNS (a regular expression that is never committed).
+_pats = [r"/home/[a-z]", r"/Users/[A-Za-z]", r"[A-Za-z]:\\Users\\"]
+if os.environ.get("S3MERGE_PRIVATE_PATTERNS"):
+    _pats.append(os.environ["S3MERGE_PRIVATE_PATTERNS"])
+pat = re.compile("|".join(_pats))
 hits = []
-for f in subprocess.run(["git", "-C", str(ROOT), "ls-files"],
-                        capture_output=True, text=True).stdout.split():
+_listed = subprocess.run(["git", "-C", str(ROOT), "ls-files", "--cached", "--others", "--exclude-standard"],
+                         capture_output=True, text=True).stdout.split()
+if not _listed:  # not a git checkout: scan the files on disk
+    _listed = [str(q.relative_to(ROOT)) for q in ROOT.rglob("*") if q.is_file() and ".git" not in q.parts]
+for f in _listed:
     p = ROOT / f
     if p.suffix in (".png", ".pdf"):
         continue

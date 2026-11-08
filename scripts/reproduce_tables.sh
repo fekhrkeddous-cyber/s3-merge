@@ -1,108 +1,41 @@
 #!/usr/bin/env bash
-# =============================================================================
-# S³-Merge: Reproduce All Paper Results
-# =============================================================================
-#
-# Prerequisites:
-#   - Docker container running (see README.md)
-#   - ImageNet-1K val set at /data/imagenet (or adjust IMAGENET_DIR below)
-#   - For downstream: ADE20K/COCO datasets + mmseg/detectron2 checkpoints
-#
-# Usage:
-#   bash scripts/reproduce_tables.sh [table_number]
-#   bash scripts/reproduce_tables.sh           # Run all
-#   bash scripts/reproduce_tables.sh 1         # Table 1 only
-#
-# =============================================================================
-
+# Run the paper campaigns whose producers are included in this release (see EXPERIMENTS.md for protocols and outputs).
+# Usage: bash scripts/reproduce_tables.sh <item>
+#   table1   unified comparison with official ToMe (Table 1, Fig. 5, S20-S22)   needs IMAGENET_SHARDS, TOME_PATH
+#   table4   controlled 2x2 factorial study (Table 4, S17-S19)                   needs IMAGENET_SHARDS
+#   table7   ViT-B/16 row of Table 7 (PA-off reconstruction)                     needs IMAGENET_CACHE
+#   safemode Safe Mode calibration (Section 5)
+#   tests    unit tests (CPU) and the bounded GPU execution check
+# Measurements are hardware-dependent and are not expected to be bit-identical to the paper.
 set -euo pipefail
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="$(dirname "$SCRIPT_DIR")"
-cd "$ROOT_DIR"
-
-IMAGENET_DIR="${IMAGENET_DIR:-/data/imagenet}"
-
-run_table() {
-    local table="$1"
-    echo ""
-    echo "================================================================"
-    echo "  Reproducing Table $table"
-    echo "================================================================"
-    echo ""
-
-    case "$table" in
-        2)
-            echo "Table 2: Main ImageNet-1K comparison (DeiT-S, 50k val, 5 seeds)"
-            echo "Expected runtime: ~45 min on H100"
-            python eval_imagenet_baselines.py --seeds 5
-            ;;
-        3)
-            echo "Table 3: Throughput scaling across batch sizes (B=1..64)"
-            python benchmark_batch_scaling.py
-            ;;
-        4)
-            echo "Table 4: Overhead decomposition"
-            python profile_overhead.py
-            ;;
-        7)
-            echo "Table 7: Factorised ablation"
-            python run_ablation_experiments.py
-            ;;
-        8)
-            echo "Table 8: ADE20K UPerNet-ViT-B backbone throughput (requires mmseg)"
-            python eval_ade20k_upernet.py
-            ;;
-        9)
-            echo "Table 9: COCO ViTDet-B end-to-end evaluation (requires detectron2)"
-            python eval_coco_vitdet.py
-            ;;
-        fig4)
-            echo "Figure 4: Accuracy-throughput Pareto frontier"
-            python generate_pareto_fixed.py
-            ;;
-        fig5)
-            echo "Figure 5: Latency/throughput scaling vs batch size"
-            python generate_batch_scaling_pa.py
-            ;;
-        fig6)
-            echo "Figure 6: CUDA kernel time breakdown (168 launches vs 10)"
-            python scripts/profile_kernel_breakdown.py --batch_sizes 1 32 --figure_out artifacts/kernel_profiling.pdf
-            ;;
-        fig7)
-            echo "Figure 7: Amdahl decomposition"
-            python plot_amdahl_decomposition.py
-            ;;
-        sdpa)
-            echo "Supplementary Table S13: Controlled SDPA backend experiment"
-            python benchmark_sdpa_control.py
-            ;;
-        cross_hw)
-            echo "Supplementary Tables S5 / S14: Cross-hardware validation"
-            python benchmark_cross_hardware.py
-            ;;
-        *)
-            echo "Unknown table: $table"
-            echo "Valid options: 2, 3, 4, 7, 8, 9, fig4, fig5, fig6, fig7, sdpa, cross_hw"
-            exit 1
-            ;;
-    esac
-}
-
-if [ $# -eq 0 ]; then
-    echo "Running ALL reproducibility experiments..."
-    for t in 2 3 4 7 fig4 fig5 fig6 fig7; do
-        run_table "$t"
-    done
-    echo ""
-    echo "=========================================="
-    echo "  Skipped: Tables 8 / 9 (require mmseg / detectron2 setup)"
-    echo "  Skipped: cross_hw (requires L40S / Jetson Orin)"
-    echo "  Run individually if needed."
-    echo "=========================================="
-else
-    run_table "$1"
-fi
-
-echo ""
-echo "Done! Results saved to stdout / figures/ directory."
+cd "$(dirname "$0")/.."
+export PYTHONPATH="$PWD${PYTHONPATH:+:$PYTHONPATH}"
+OUT="${OUT:-out}"
+need() { if [ -z "${!1:-}" ]; then echo "set $1 (see EXPERIMENTS.md)"; exit 2; fi; }
+case "${1:-}" in
+    table1)
+        need IMAGENET_SHARDS; need TOME_PATH
+        python r3/unified_tome/accuracy_campaign.py --output-dir "$OUT/table1_accuracy" --data-dir "$IMAGENET_SHARDS" --tome-path "$TOME_PATH"
+        python r3/unified_tome/accuracy_analysis.py --runs-dir "$OUT/table1_accuracy/runs" --output-dir "$OUT/table1_accuracy/analysis"
+        python r3/unified_tome/timing_campaign.py --output-dir "$OUT/table1_timing" --tome-path "$TOME_PATH" \
+            --accuracy-analysis "$OUT/table1_accuracy/analysis/accuracy_analysis.json"
+        python r3/unified_tome/gmac.py --output-dir "$OUT/table1_gmac" ;;
+    table4)
+        need IMAGENET_SHARDS
+        python r3/factorial/campaign.py accuracy --output-dir "$OUT/table4/accuracy" -- --data-dir "$IMAGENET_SHARDS" --device cuda
+        python r3/factorial/analyze_accuracy.py --runs-dir "$OUT/table4/accuracy" --output-dir "$OUT/table4/analysis"
+        python r3/factorial/campaign.py timing --modes latency --output-dir "$OUT/table4/timing" -- --device cuda
+        python r3/factorial/analyze_timing.py --raw-dir "$OUT/table4/timing" --output-dir "$OUT/table4/analysis" ;;
+    table7)
+        need IMAGENET_CACHE
+        python r3/table7_vitb16/run_table7_vitb16.py --output-dir "$OUT/table7_vitb16" --imagenet-cache "$IMAGENET_CACHE" ;;
+    safemode)
+        python -m models.safemode --validate ;;
+    tests)
+        python tests/test_release.py
+        python tests/test_public.py
+        python r3/factorial/test_factorial.py
+        python tests/smoke_gpu.py ;;
+    *)
+        sed -n '2,10p' "$0"; exit 1 ;;
+esac

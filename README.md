@@ -14,73 +14,93 @@ Public repository: https://github.com/fekhrkeddous-cyber/s3-merge
 
 ## Method overview
 
-**S³-Merge Core** (the complete default method): a single-shot merge at a late
-transformer block. Tokens are partitioned into w×w spatial windows; within each
-window, K target tokens are selected, sources are assigned to their most-similar
-target by hard cosine argmax, and clusters are fused by uniform normalized averaging
-(paper Eq. 1). A restore mapping reconstructs the full token grid for dense heads.
-Windowing bounds merge displacement by √2(w−1) patches.
+**S³-Merge Core** is a single-shot merge after a late transformer block:
+- the patch tokens are partitioned into w×w spatial windows;
+- K = ⌊T / n_windows⌋ target tokens are kept per window;
+- each remaining token is assigned to its most similar target by hard cosine argmax;
+- each cluster is fused by uniform averaging (paper Eq. 1).
 
-**Proportional attention (PA)** is an *optional, task-dependent* correction, not part
-of Core: it improves classification by +0.48 Top-1, changes ADE20K by only
-+0.02–0.06 mIoU at a 1.2–2.4% throughput cost, and provides no benefit on COCO.
-The default dense pipeline therefore runs Core without PA.
+[CLS] is excluded from windowing. A restore mapping reconstructs the full token grid for dense heads. Windowing bounds merge displacement by √2(w−1) patches.
 
-**Target selection** is policy-neutral:
-- *seeded random Static-K* (historical classification configuration; 79.49 ± 0.03%
-  Top-1 over 30 seeds, lowest measured selection cost);
-- *deterministic variance-aware Static-K* (recommended for dense prediction);
-- *Adaptive-K*: variable per-window keep counts K_w ∈ [K_min, K_max] under an exact
-  per-image global budget, fully vectorized, packed no-padding execution with
-  exact-coordinate relative positions (`models/adaptive_k.py`).
+**Proportional attention (PA)** is an *optional, task-dependent* correction and is not part of Core. It recovers 0.48% Top-1 on DeiT-S classification (paper Table S24) and does not help COCO detection (Table S8). The dense experiments and the factorial study run Core without PA.
 
-**Safe Mode** (`models/safemode.py`) is a conservative *empirical* routing policy —
-not a guarantee: a one-time calibration sweep measures baseline vs merged latency per
-batch size and activates the merged path only where the bootstrap 95% lower confidence
-bound of the speedup exceeds 1.02. The result is cached (keyed by model, merge config,
-device, driver, precision, resolution, backend), loaded once, and consulted by an
-in-memory lookup; unqualified batch sizes fall back to the unmodified baseline.
+**Target selection:**
+- *seeded random Static-K*: the classification default;
+- *deterministic variance-aware Static-K*: used for dense prediction;
+- *Adaptive-K*: variable per-window counts under an exact per-image budget, with packed no-padding execution and exact-coordinate relative positions (`models/adaptive_k.py`).
 
-## Main results (ImageNet-1K, DeiT-S/16, H100 NVL, FP32)
+**Safe Mode** is an empirical routing policy, not a guarantee. `models/safemode.py` implements its **calibration step** for DeiT-S/16 at 224²:
+- it measures baseline and merged latency for B ∈ {1, 2, 4, 8, 16, 32};
+- a batch size qualifies when the bootstrap 95% lower confidence bound of the speed-up exceeds 1.02;
+- it caches B*.
 
-| Method | Top-1 (%) | ΔTop-1 | B=1 (ms) ↓ | B=32 (img/s) ↑ |
-|--------|-----------|--------|-------------|-----------------|
-| Baseline | 79.71 | — | 2.33 | 2543 |
-| ToMe r=10 | 79.09 | −0.62 | 7.32 | 3002 |
-| **S³-Merge-Acc (l8+PA)** | **79.50 ± 0.02** | **−0.21** | 2.87 | 2938 |
-| S³-Merge-Speed (l6+PA) | 79.01 ± 0.05 | −0.70 | 2.98 | **3306** |
+This repository ships the calibrator only, not a dispatcher. The paper does not report routed end-to-end latency.
 
-Timings are from the paper's unified FP32 campaign (five invocations, 30 warm-up +
-200 timed iterations, per-iteration synchronization); accuracy and timing are
-separate evaluations. ToMe r=12 exceeds S³-Merge-Acc at B=32 and leads at B=64;
-S³-Merge-Speed leads at B=32 (details in the paper's Section 6.3).
+## Main results (paper Table 1)
 
-Dense prediction (measured end-to-end framing, no universal-acceleration claim):
-- **ViTDet-B / Mask R-CNN (COCO)** is *decoder-bound* (decoder ≈29% of latency):
-  Adaptive-K holds full-COCO box AP to −0.09 with a small but statistically robust
-  1–2% end-to-end gain — the honest Amdahl ceiling of this pipeline family.
-- **LW-DETR-medium (COCO)** is *encoder-dominated* (≈88% of latency at B=8):
-  deterministic variance-aware Static-K (K=75/100, merged after the first six encoder
-  blocks, wrapper-level integration of the official code) yields a **1.114×
-  [1.112, 1.115]** end-to-end speedup at B=8 for −0.46 box AP on full val2017.
-- Packed variable-K execution requires a globally compatible post-merge suffix;
-  architectures that retain post-merge window attention (e.g., LW-DETR) use the
-  deterministic regular per-window Static-K variant instead.
+ImageNet-1K, DeiT-S/16, H100 NVL, FP32, unified protocol with official ToMe:
+
+| Method | Tok. | Top-1 (%) | ΔTop-1 | B=1 (ms) ↓ | B=8 (ms) ↓ | B=32 (img/s) ↑ |
+|--------|-----:|-----------|--------|-----------:|-----------:|---------------:|
+| Baseline | 197 | 79.71 | — | 2.37 | 3.92 | 2544 |
+| ToMe r=10 | 77 | 79.09 | −0.62 | 7.45 | 7.64 | 3040 |
+| ToMe r=12 | 53 | 78.90 | −0.81 | 7.46 | 7.66 | 3287 |
+| **S³-Merge-Acc (L_s=9, +PA)** | 85 | **79.50 ± 0.02** | **−0.21** | 2.92 | 3.64 | 2948 |
+| S³-Merge-Speed (L_s=7, +PA) | 85 | 79.01 ± 0.06 | −0.69 | 3.04 | **3.37** | **3330** |
+
+- **Latencies** are means over **ten** independent invocations in randomized method order (30 synchronized warm-up passes, then 200 timed passes with synchronization around every iteration). B=32 throughput is the geometric mean over invocations.
+- **Accuracy** is evaluated separately on the full 50k validation set; S³-Merge Top-1 is the five-seed mean ± std.
+- **Environment:** PyTorch 2.1.2, CUDA 12.1, timm 1.0.24, no autocast, no `torch.compile`. Clocks were not locked (default boost, 400 W cap).
+- **Reproduction:** latency is hardware- and software-dependent, so these values are not expected to be reproduced bit-exactly.
+
+## Experimental campaigns: do not combine values across them
+
+The paper's results come from **separate campaigns** with different protocols. Values from different campaigns should not be combined or compared directly, even for the same configuration.
+
+| Campaign | Paper items | Protocol | Code in this repository |
+|---|---|---|---|
+| Unified official-ToMe comparison | Table 1, Fig. 5, Tables S20–S22 | H100 NVL, FP32, B ∈ {1, 8, 32}, 30+200 with per-iteration sync, **10 invocations**, randomized order; accuracy 50k val (5 seeds for S³-Merge) | `r3/unified_tome/` (adapted harness; the sixth, non-Table-1 configuration that the paper campaign interleaved is not timed) |
+| Controlled 2×2 factorial study (schedule × scope) | Table 4, Tables S17–S19 | DeiT-S/16 at 224², 84 patch tokens in every arm, **no PA**, FP32, H100 NVL; Top-1 five-seed mean on the full 50k val; latency mean over **ten paired invocations** | `r3/factorial/` (adapted harness) |
+| ViT-B/16 model-scale row | Table 7 (row b) | Historical AMP/FP16 run, PA off, B ∈ {1, 64}, 30+200 with sync around the timed loop, one invocation (Supplementary Section S1.2) | `r3/table7_vitb16/` (reconstruction of the configuration) |
+| Separate batch-scaling campaign | Fig. 6, Table S11 | FP32, five invocations, B ∈ [1, 64] | not included |
+| Downstream: COCO ViTDet-B (packed path), LW-DETR-medium | Table 5, Tables S5, S15 | FP32, five invocations, PA off | merge core only (`models/adaptive_k.py`); drivers not included |
+| Cross-hardware: L40S, Jetson Orin | Table 9, Tables S4, S10, S14 | per-device campaigns, B* device-specific | not included |
+| Other ablations and original-campaign baselines | e.g. Tables S2, S3, S12, S23, S24 | protocol stated per table in the supplement | partly (see `EXPERIMENTS.md`) |
+
+`PAPER_CODE_MATRIX.md` lists, for every main result, the script, the configuration, the public status, the test status and the known limitations. `REPRODUCIBILITY.md` (§5a) separates the adapted reproduction harnesses from the historical scripts. None of them reproduces historical measurements bit-exactly.
+
+## Configurations
+
+`late_start` is the 0-indexed block whose output is merged, so **paper L_s = `late_start` + 1**.
+
+| Configuration | `apply_patch(...)` | Paper |
+|---|---|---|
+| S³-Merge-Acc | `target_tokens=84, late_start=8, window_size=7, prop_attn=True` | L_s=9, T=84, w=7, PA |
+| S³-Merge-Speed | `target_tokens=84, late_start=6, window_size=7, prop_attn=True` | L_s=7, T=84, w=7, PA |
+| Core without PA | as above with `prop_attn=False` | factorial study, dense prediction |
+| Table 7 ViT-B/16 | `target_tokens=136, late_start=8, window_size=7, prop_attn=False` (AMP/FP16) | L_s=9, 136 patch tokens (137 with [CLS]), no PA |
+| 384² (patch 16, 24×24 grid) | `window_size=8`; the grid is read from the model | Tables S1, S7 |
+
+**Grid and window.**
+- The patch grid is taken from the model, or derived from the token count, and validated.
+- The window size must divide the grid. Otherwise `apply_patch` raises a `ValueError` instead of silently skipping the merge.
+- The window-sweep keep-all controls (w ≥ grid, or w = 1) perform no merge by construction. They must be requested explicitly with `keep_all_control=True`.
+
+**Token budget.** K = ⌊T / n_windows⌋ per window. For example, `target_tokens=171` at 224² with w=7 (4 windows) keeps 168 patch tokens plus [CLS].
+
+**Resolved configuration.** `model.s3merge_config` holds the resolved configuration.
 
 ## Installation
 
 ```bash
-pip install -r requirements.txt          # torch>=2.1, timm>=1.0 recommended
-# or, full reproducibility:
+pip install -r requirements.txt     # tested environment: Python 3.10, torch 2.1.2 (CUDA 12.1), timm 1.0.24
+pip install "git+https://github.com/facebookresearch/ToMe.git@af95e4b1befa172dadccd8c81e223b10090f9579"   # only for r3/unified_tome
+# or, as a container:
 docker build -f Dockerfile -t s3merge:cu121 .
-docker run --gpus all --shm-size=16g -it -v /path/to/imagenet:/data/imagenet -v $PWD:/workspace s3merge:cu121
+docker run --gpus all --shm-size=16g -it -v $PWD:/workspace s3merge:cu121
 ```
 
-Baselines (optional): ToMe `pip install git+https://github.com/facebookresearch/ToMe.git`;
-PiToMe `git clone https://github.com/hchautran/PiToMe.git baselines/PiToMe`
-(commit 550b5dee used in the paper); ATC `git clone https://github.com/JoakimHaurum/ATC.git baselines/ATC`;
-DSM is a labelled re-implementation (`baselines/dsm_impl.py`) — no public official
-implementation of the published method was identified. See `baselines/README.md`.
+ImageNet-1K is read through Hugging Face `datasets` (`ILSVRC/imagenet-1k`), which requires accepting the dataset's terms. Data locations are passed to each script as arguments; see `REPRODUCIBILITY.md`.
 
 ## Quick start (classification)
 
@@ -89,71 +109,47 @@ import timm, torch
 from models.sr_tome import apply_patch
 
 model = timm.create_model("deit_small_patch16_224", pretrained=True).cuda().eval()
-apply_patch(model, target_tokens=84, late_start=8, window_size=7, prop_attn=True)  # S³-Merge-Acc
+apply_patch(model, target_tokens=84, late_start=8, window_size=7, prop_attn=True)   # S³-Merge-Acc (L_s=9)
+print(model.s3merge_config)        # resolved grid, windows, K per window, output tokens, PA setting
 x = torch.randn(8, 3, 224, 224, device="cuda")
 with torch.no_grad():
     y = model(x)
 ```
 
-Adaptive-K / variance-aware Static-K (grid features, packed execution):
+For Adaptive-K and variance-aware Static-K on grid features, see `models/adaptive_k.py`. Its functions are exercised in `tests/test_release.py`.
 
-```python
-import torch
-from models.adaptive_k import PackGeometry, allocate_slot_auction, allocate_uniform, \
-    window_scores, adaptive_merge_pack, unpack_restore
+## Tests
 
-x = torch.randn(2, 64, 56, 384, device="cuda")          # (B, H, W, C) feature grid
-geom = PackGeometry.get(64, 56, 8, x.device)             # 8x8 merge windows
-win = x.view(2, geom.nWh, 8, geom.nWw, 8, 384).permute(0,1,3,2,4,5).reshape(2, geom.n_windows, 64, 384)
-_, s_w = window_scores(win)
-K_w = allocate_slot_auction(s_w, K_min=32, K_max=64, T_g=3136)   # Adaptive-K, exact budget
-# K_w = allocate_uniform(s_w, 56, 56, geom.n_windows*56)         # variance-aware Static-K
-packed, coords, restore_idx, stats = adaptive_merge_pack(x, geom, K_w)   # Eq. 1 semantics
-full = unpack_restore(packed, restore_idx, 64, 56)                        # dense restore
+```bash
+python tests/test_release.py    # synthetic-tensor unit tests (CPU; no dataset or checkpoint downloads)
+python tests/test_public.py     # import, syntax, shape and hygiene checks
+python tests/smoke_gpu.py       # bounded GPU execution check (not a benchmark)
 ```
 
-Safe Mode: `python models/safemode.py --validate` runs one cold calibration and prints
-the per-batch decisions and B*; the JSON cache is then consulted in-memory at dispatch.
+## Scope and limitations
 
-## Dense-prediction integration
+- **Model structure:** `apply_patch` targets timm-style ViTs with exactly one [CLS] token and a square patch grid. Other layouts raise an error.
+- **PA:** requires timm's `Block.forward(x, attn_mask=...)` (timm 1.0.24 is pinned).
+- **Packed variable-K:** requires every post-merge block to be global-attention compatible.
+- **Not included in this release:**
+  - the COCO ViTDet drivers (Table 5);
+  - the LW-DETR wrapper (Table S15);
+  - the L40S and Jetson Orin campaign runners (Tables 9, S4, S10, S14);
+  - the Hugging Face DINOv2/SigLIP adapter (Table 8);
+  - the PiToMe compatibility adapter (Table S23).
 
-Two execution paths are distinguished:
-1. **Regular-grid compatibility path (Static-K)** — merged tokens are re-formed into a
-   smaller regular grid so window attention keeps working (`eval_coco_vitdet.py`,
-   `models/sr_tome_downstream.py`); relative positions are interpolated to the grid.
-2. **Packed exact-coordinate path** — packed no-padding sequences with original-grid
-   coordinates for relative positions (`models/adaptive_k.py`); requires every
-   post-merge block to be global-attention compatible. Adaptive-K runs exclusively
-   on this path.
+  `REPRODUCIBILITY.md` lists all unavailable components.
+- **Evaluated scope:**
+  - classification: DeiT-S/16, ViT-B/16, ViT-L/16, DINOv2-L/14, SigLIP-L/16;
+  - dense prediction: ViTDet-B and LW-DETR-medium on COCO;
+  - deployment: H100 NVL, L40S, Jetson Orin.
 
-## Reproducibility and timing protocol
-
-The paper's timing protocol: 30 warm-up + 200 timed iterations, per-iteration
-`torch.cuda.synchronize()`, five independent process invocations, paired-bootstrap
-95% confidence intervals; FP32 on datacenter GPUs (ViT-B/16 rows use AMP/FP16 as
-labelled). Some historical scripts in this repository use their own documented
-iteration counts (see `EXPERIMENTS.md`); classification accuracy protocols use the
-full 50k ImageNet-1K validation set in canonical order with per-seed
-`torch.manual_seed`/`np.random.seed`. Evaluated scope: DeiT-S/B, ViT-B/L, DINOv2-L,
-SigLIP-L (classification); UPerNet-ADE20K, ViTDet-COCO, LW-DETR-COCO (dense);
-H100, L40S, Jetson Orin (deployment). Claims are restricted to this scope.
-
-## Limitations / architecture compatibility
-
-- `apply_patch` targets timm-style ViTs (a `model.blocks` list, CLS token); the window
-  size must divide the patch grid (non-divisible grids are a no-op by design).
-- PA requires a timm version whose `Block.forward` accepts `attn_mask`.
-- Packed variable-K needs a globally compatible post-merge suffix (see above).
-- Safe Mode is an empirical routing policy calibrated per device/configuration;
-  it provides no formal guarantee.
-- HF DINOv2/SigLIP classification requires the small `encoder.forward` adapter
-  described in `EXPERIMENTS.md`.
+  Claims are restricted to this scope.
 
 ## Citation
 
-Paper under double-blind review at a journal (second-round revision). A BibTeX entry
-will be added upon acceptance.
+The manuscript is under review at *Pattern Recognition* (revision R3). A BibTeX entry will be added upon acceptance.
 
 ## License
 
-MIT (see `LICENSE`).
+MIT (see `LICENSE`). Third-party projects are not redistributed; see `THIRD_PARTY_NOTICES.md`.

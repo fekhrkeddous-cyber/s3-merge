@@ -1,0 +1,52 @@
+# Paper Table 4 / Supplementary Tables S17-S19: controlled 2x2 factorial study (merge schedule x matching scope).
+# REFERENCE ONLY: the scripts do not read this file. It mirrors their command-line defaults, which already equal the
+# paper protocol; test_factorial.py checks that the two agree.
+
+model:
+  name: deit_small_patch16_224            # timm
+  weights: timm/deit_small_patch16_224.fb_in1k
+  checkpoint_file_sha256: 1e747b4a8d0df2cfbd3c450e8c97685d867448ab0c2ddbfb34b6885f5cb23e5b   # model.safetensors
+  state_sha256: a17d00754ef1e5401cf33cf61af23094c48b8f4a4f5f8898d8ae36b9d81925e1            # loaded weights
+
+arms:                                     # merge-after block indices are 0-indexed (index 8 = paper "block 9")
+  baseline: {merge: none}
+  core: {apply_patch: {target_tokens: 84, late_start: 8, window_size: 7, weighted_merge: false, tau: 0.3,
+                       content_adaptive: false, prop_attn: false, grid_size: 14, keep_all_control: false}}
+  SW: {merge_after_block_index: [8], removals_per_window: [28], scope: windowed}
+  SG: {merge_after_block_index: [8], removals_per_window: [28], scope: global}
+  PW: {merge_after_block_index: [5, 6, 7, 8], removals_per_window: [7, 7, 7, 7], scope: windowed}
+  PG: {merge_after_block_index: [5, 6, 7, 8], removals_per_window: [7, 7, 7, 7], scope: global}
+  final_patch_tokens: 84                  # 85 with [CLS]; 4 windows x 21 targets
+  proportional_attention: false
+
+inference:
+  precision: fp32
+  autocast: false
+  torch_compile: false
+  tf32_matmul: false
+  tf32_cudnn: true
+  cudnn_benchmark: false
+
+accuracy:                                 # accuracy.py
+  dataset: ILSVRC/imagenet-1k (Hugging Face arrow shards), split validation, 50000 images, order 0..49999
+  shard_pattern: "imagenet-1k-validation-*-of-*.arrow"
+  preprocessing: Resize(256) -> CenterCrop(224) -> ToTensor -> Normalize(ImageNet mean/std)
+  batch_size: 64
+  num_workers: 8
+  seeds: [0, 1, 2, 3, 4]                  # factorial arms; baseline and core use seed 0
+  run_order: [baseline_s0, core_s0, "SW/SG/PW/PG for seed 0", "... seed 1", "... seed 2", "... seed 3", "... seed 4"]
+
+timing:                                   # timing.py
+  arms: [baseline, SW, SG, PW, PG]
+  batch_sizes: [1, 8, 32]
+  warmup: 30
+  timed: 200
+  profiled_forwards: 20
+  select_seed: 1000                       # torch.manual_seed before every (arm, B) cell
+  input_seed: 20260718                    # CPU generator for the synthetic inputs (drawn for B = 1, 8, 32 in order)
+  order_seed: 20261103                    # random.Random: arm order per invocation
+  invocations: {latency: 10, profile: 3, merge_micro: 5}
+
+analysis:
+  accuracy: {margin_pp: 0.10, interval: "Student-t 95%, df = 4"}
+  timing: {margin_pct: 1.0, interval: "Student-t 95% on ln latency, df = 9", bootstrap: 10000, bootstrap_rng: "numpy default_rng(0)"}

@@ -17,8 +17,10 @@ Scientific validation mode (--validate): runs ONE cold calibration in this proce
 and reports duration + per-B decisions + B*; five independent cold runs are obtained
 by invoking this script five times in fresh processes.
 
-Model under calibration: DeiT-S/16 @224, S3-Merge l8 (target 84 tokens, w=7, no PA,
-Eq. 1 uniform-average path), FP16 autocast (datacenter convention).
+Model under calibration: DeiT-S/16 @224, S3-Merge late_start=8 (paper L_s=9; target 84 tokens, w=7,
+Eq. 1 uniform-average path). Defaults: FP32 (SM_FP32=1) and no PA (SM_PA=0).
+Run from the repository root:  python -m models.safemode --validate
+This module calibrates B* and caches the per-batch decision; it does not dispatch batches.
 """
 import argparse
 import hashlib

@@ -29,7 +29,8 @@ class PackGeometry:
 
     def __init__(self, H, W, ws, device):
         self.H, self.W, self.ws = H, W, ws
-        assert H % ws == 0 and W % ws == 0, "grid must divide by merge window"
+        if ws < 1 or H % ws or W % ws:
+            raise ValueError(f"S3-Merge packed path: merge window {ws} must divide the {H}x{W} grid")
         self.nWh, self.nWw = H // ws, W // ws
         self.n_windows = self.nWh * self.nWw
         self.tpw = ws * ws
@@ -117,17 +118,18 @@ ALLOCATORS = {"auction": allocate_slot_auction, "uniform": allocate_uniform}
 
 
 # ============================================================================
-# Selection, merge (Eq. 2), packing, restore — one fused stage, static shapes
+# Selection, merge (paper Eq. 1), packing, restore — one fused stage, static shapes
 # ============================================================================
 
 def adaptive_merge_pack(x_grid, geom, K_w, merge="eq2", tau=0.3, sel_scores=None):
     """x_grid: (B, H, W, C) -> packed (B, T_g, C), coords (B,T_g,2), restore (B,H*W), stats.
 
     All merge arms share this code path; K_w decides fixed vs variable allocation.
-    merge='eq2'            : manuscript Eq. 2 (primary).
+    merge='eq2'            : the paper's Eq. 1 uniform mean (primary; the API value 'eq2' is kept
+                             for backward compatibility).
     merge='weighted_static': public Static-K weighted variant (ablation ONLY).
     sel_scores (B,nW,tpw)  : optional selection scores replacing per-token variance
-                             (e.g. random scores for the Static-K Eq.2 arm).
+                             (e.g. random scores for the Static-K Eq. 1 arm).
     """
     B, H, W, C = x_grid.shape
     nW, tpw = geom.n_windows, geom.tpw
@@ -151,7 +153,7 @@ def adaptive_merge_pack(x_grid, geom, K_w, merge="eq2", tau=0.3, sel_scores=None
     dst = torch.where(target_mask, base[:, :, None] + kept_rank_local,
                       torch.full_like(kept_rank_local, T_g))              # trash slot = T_g
 
-    # ---- merge: hard argmax assignment + Eq. 2 averaging ----
+    # ---- merge: hard argmax assignment + Eq. 1 averaging ----
     xn = F.normalize(win, dim=-1)
     sim = xn @ xn.transpose(2, 3)                                         # (B,nW,tpw,tpw)
     sim = sim.masked_fill(~target_mask[:, :, None, :], float("-inf"))
@@ -219,7 +221,7 @@ def _packed_rel_bias(attn, q, rel_pos, coord, size, num_heads):
     bias[b,h,i,j] = q[b,h,i] . rel_pos_lut[coord_i, coord_j]
     Exact generalization of detectron2 add_decomposed_rel_pos (grid = special case).
     """
-    from d2vit_extract import get_rel_pos
+    from detectron2.modeling.backbone.utils import get_rel_pos  # official ViTDet relative-position helper
     Bnh, T, hd = q.shape
     B = Bnh // num_heads
     lut = get_rel_pos(size, size, rel_pos)                    # (size, size, hd) official LUT

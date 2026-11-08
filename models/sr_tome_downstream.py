@@ -26,6 +26,10 @@ class GridMappingCache:
     
     def __init__(self, H: int, W: int, window_size: int, device: torch.device):
         ws = window_size
+        if ws < 1:
+            raise ValueError(f"S3-Merge: window_size must be >= 1 (got {ws})")
+        if ws < H and ws < W and (H % ws or W % ws):
+            raise ValueError(f"S3-Merge: window_size={ws} does not divide the {H}x{W} grid")
         n_windows_h = H // ws
         n_windows_w = W // ws
         tokens_per_window = ws * ws
@@ -82,6 +86,7 @@ def sr_tome_merge_with_unmerge_cached(
     track_sizes: bool = False,     # Return token sizes for proportional attention
     keep_hw: tuple = None,         # (kh, kw) rectangular keep-grid per window
     target_policy: str = "random", # "random" or "stratified"
+    keep_all_control: bool = False, # accept configurations that perform no merge by construction
 ) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
     """
     SR-ToMe merge with restore_idx for unmerging (CACHED version).
@@ -105,10 +110,12 @@ def sr_tome_merge_with_unmerge_cached(
     tokens_per_window = cache.tokens_per_window
     
     if patches.shape[1] != H * W:
-        restore_idx = torch.arange(n_patches, device=device).unsqueeze(0).expand(B, -1)
-        return x, restore_idx, None
+        raise ValueError(f"S3-Merge: input has {patches.shape[1]} patch tokens but the cached grid is {H}x{W}")
     
     if ws >= H or ws >= W:
+        if not keep_all_control:
+            raise ValueError(f"S3-Merge: window_size {ws} >= grid {H}x{W} performs no merge (keep-all control); "
+                             f"pass keep_all_control=True only to run it deliberately")
         restore_idx = torch.arange(n_patches, device=device).unsqueeze(0).expand(B, -1)
         return x, restore_idx, None
     
@@ -117,6 +124,8 @@ def sr_tome_merge_with_unmerge_cached(
         kh, kw = keep_hw
         K = kh * kw
     else:
+        if target_tokens // n_windows < 1 and tokens_per_window > 1:
+            raise ValueError(f"S3-Merge: target_tokens={target_tokens} is smaller than the {n_windows} windows")
         K = target_tokens // n_windows
         K = max(1, K)
         K = min(K, tokens_per_window)
@@ -124,6 +133,9 @@ def sr_tome_merge_with_unmerge_cached(
     n_sources = tokens_per_window - K
     
     if n_sources <= 0:
+        if not keep_all_control:
+            raise ValueError(f"S3-Merge: K={K} >= window area {tokens_per_window} performs no merge (keep-all "
+                             f"control); pass keep_all_control=True only to run it deliberately")
         restore_idx = torch.arange(n_patches, device=device).unsqueeze(0).expand(B, -1)
         return x, restore_idx, None
     
@@ -315,17 +327,29 @@ class SRToMeDownstream(nn.Module):
         target_tokens: int = 84,
         late_start: int = 8,
         window_size: int = 7,
-        grid_size: int = 14,
+        grid_size: Optional[int] = None,  # derived from model.patch_embed.grid_size when None
         weighted_merge: bool = False,  # Eq. 1 uniform averaging (paper default; set True for the similarity-weighted ablation)
         tau: float = 0.1,
         prop_attn: bool = False,
+        keep_all_control: bool = False,
     ):
         super().__init__()
         self.model = model
         self.target_tokens = target_tokens
         self.late_start = late_start
         self.window_size = window_size
-        self.grid_size = grid_size
+        pe_grid = getattr(getattr(model, "patch_embed", None), "grid_size", None)
+        if pe_grid is not None:
+            gh, gw = (pe_grid, pe_grid) if isinstance(pe_grid, int) else tuple(pe_grid)
+            if grid_size is not None and (gh, gw) != (grid_size, grid_size):
+                raise ValueError(f"S3-Merge: grid_size={grid_size} but the model's patch grid is {gh}x{gw}")
+        elif grid_size is not None:
+            gh = gw = grid_size
+        else:
+            raise ValueError("S3-Merge: cannot determine the patch grid; pass grid_size explicitly")
+        self.grid_h, self.grid_w = int(gh), int(gw)
+        self.grid_size = self.grid_h  # backward compatibility (square grids)
+        self.keep_all_control = keep_all_control
         self.weighted_merge = weighted_merge
         self.tau = tau
         self.prop_attn = prop_attn
@@ -336,7 +360,7 @@ class SRToMeDownstream(nn.Module):
     def _get_cache(self, device: torch.device) -> GridMappingCache:
         """Lazy initialization of cached grid mapping."""
         if self._cache is None or self._cache.local_win_idx.device != device:
-            self._cache = GridMappingCache.get(self.grid_size, self.window_size, device)
+            self._cache = GridMappingCache.get(self.grid_h, W=self.grid_w, window_size=self.window_size, device=device)
         return self._cache
         
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -364,7 +388,7 @@ class SRToMeDownstream(nn.Module):
                 x, self._restore_idx, token_sizes = sr_tome_merge_with_unmerge_cached(
                     x, self.target_tokens, cache,
                     weighted_merge=self.weighted_merge, tau=self.tau,
-                    track_sizes=self.prop_attn,
+                    track_sizes=self.prop_attn, keep_all_control=self.keep_all_control,
                 )
                 merged = True
                 # Build PA mask: log(size) broadcast for [B, heads, Q, K]
@@ -374,10 +398,10 @@ class SRToMeDownstream(nn.Module):
         x = self.model.norm(x)
         
         if self._restore_idx is not None:
-            features = sr_tome_unmerge(x, self._restore_idx, grid_size=self.grid_size)
+            features = sr_tome_unmerge(x, self._restore_idx, grid_h=self.grid_h, grid_w=self.grid_w)
         else:
             patches = x[:, 1:]
-            features = patches.view(x.shape[0], self.grid_size, self.grid_size, -1)
+            features = patches.view(x.shape[0], self.grid_h, self.grid_w, -1)
             features = features.permute(0, 3, 1, 2)
         
         return features
@@ -403,7 +427,7 @@ class SRToMeDownstream(nn.Module):
                 x, _, token_sizes = sr_tome_merge_with_unmerge_cached(
                     x, self.target_tokens, cache,
                     weighted_merge=self.weighted_merge, tau=self.tau,
-                    track_sizes=self.prop_attn,
+                    track_sizes=self.prop_attn, keep_all_control=self.keep_all_control,
                 )
                 merged = True
                 if self.prop_attn and token_sizes is not None:
@@ -422,17 +446,21 @@ def create_sr_tome_downstream(
     weighted_merge: bool = False,  # Eq. 1 uniform averaging (paper default; set True for the similarity-weighted ablation)
     tau: float = 0.1,
     prop_attn: bool = False,
+    img_size: Optional[int] = None,
+    keep_all_control: bool = False,
 ) -> SRToMeDownstream:
-    base = timm.create_model(model_name, pretrained=pretrained)
+    kw = {} if img_size is None else {"img_size": img_size}
+    base = timm.create_model(model_name, pretrained=pretrained, **kw)
     return SRToMeDownstream(
         base, 
         target_tokens=target_tokens, 
         late_start=late_start, 
         window_size=window_size,
-        grid_size=14,  # For patch16/224
+        grid_size=None,  # derived from the model's patch grid
         weighted_merge=weighted_merge,
         tau=tau,
         prop_attn=prop_attn,
+        keep_all_control=keep_all_control,
     )
 
 
